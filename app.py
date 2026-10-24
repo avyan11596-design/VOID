@@ -1,17 +1,18 @@
 import streamlit as st
 import requests
 
-# Minimalist configuration
 st.set_page_config(page_title="VOID // AI Hub", page_icon="⚡", layout="centered")
 
 st.title("VOID // AI Hub")
 st.caption("Minimalist Coding & Design Assistant")
 st.markdown("---")
 
-# PERMANENTLY BAKED-IN CONFIGURATION (No input box errors)
-API_KEY = "sk-or-v1-YOUR_ACTUAL_KEY_HERE"  # <-- sk-or-v1-cb27a917f5a6c9d4ae1b2f6cc0bde95f6088f895c992679268a0f75a36130e60Paste your exact OpenRouter key here inside the quotes
+# Safely load the key from Streamlit secrets
+try:
+    API_KEY = st.secrets["OPENROUTER_API_KEY"]
+except Exception:
+    API_KEY = ""
 
-# Sidebar options
 with st.sidebar:
     st.subheader("Settings")
     model = st.selectbox(
@@ -27,12 +28,11 @@ with st.sidebar:
         ["Coder", "Architect", "Debugger", "UI Designer"]
     )
 
-# Main Prompt Area
 prompt = st.text_area("Enter your prompt or task:", height=130, placeholder="Write a clean Python script for...")
 
 if st.button("Generate", type="primary", use_container_width=True):
-    if API_KEY == "sk-or-v1-YOUR_ACTUAL_KEY_HERE" or not API_KEY.startswith("sk-or-v1-"):
-        st.warning("⚠️ Please edit app.py on GitHub and insert your actual OpenRouter API key into the API_KEY variable.")
+    if not API_KEY:
+        st.warning("⚠️ API Key missing! Please add it to your Streamlit app secrets.")
     elif not prompt:
         st.warning("⚠️ Please enter a prompt.")
     else:
