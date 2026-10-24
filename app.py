@@ -224,4 +224,182 @@ with st.sidebar:
             export_md += f"### {m['role'].upper()}:\n{m['content']}\n\n---\n\n"
         st.download_button("📥 Export Chat (.md)", export_md, file_name=f"void_{current_chat_id}.md", use_container_width=True)
 
-    st.markdown
+    st.markdown("---")
+    st.markdown("##### 🧠 Neural Engine")
+    model = st.selectbox(
+        "AI Model",
+        [
+            "google/gemini-2.5-flash",
+            "deepseek/deepseek-chat",
+            "qwen/qwen-2.5-coder-32b-instruct"
+        ]
+    )
+    
+    task_depth = st.select_slider(
+        "Reasoning Power",
+        options=["⚡ Fast", "⚖️ Balanced", "🧠 Deep (Hardest)"],
+        value="⚖️ Balanced"
+    )
+
+    with st.expander("🎛️ Fine-Tune Parameters"):
+        temperature = st.slider("Creativity", 0.0, 1.0, 0.2, 0.1)
+        max_tokens = st.slider("Max Output Tokens", 300, 3500, 1400, 100)
+
+    with st.expander(f"👥 Crew Registry ({len(db['users'])})"):
+        for u_mail, u_info in db["users"].items():
+            st.markdown(f"**`{u_mail}`**  \n<small>Prompts: {u_info.get('prompts', 0)} | Last: {u_info.get('last_active', '')}</small>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    if st.button("🚪 Logout", use_container_width=True):
+        del st.session_state.user_email
+        st.rerun()
+
+# --- 6. MULTI-INTERFACE WORKSPACE ---
+render_header("STUDIO v5.0")
+
+# 3 Distinct Interfaces via Clean Tabs
+tab_chat, tab_studio, tab_lab = st.tabs([
+    "💬 Neural Chat",
+    "⚡ Live Web & UI Builder",
+    "🛠️ Code Refactor Lab"
+])
+
+# ==========================================
+# INTERFACE 1: NEURAL CHAT (Conversational)
+# ==========================================
+with tab_chat:
+    col_mode, col_file = st.columns([2, 1])
+    with col_mode:
+        persona_mode = st.segmented_control(
+            "Specialist Persona",
+            ["💻 Coder", "🏗️ Architect", "🐞 Debugger", "🎨 UI Designer", "🎓 Tutor"],
+            default="💻 Coder"
+        )
+    with col_file:
+        uploaded_file = st.file_uploader("📎 Attach Code File (Optional)", type=["py", "js", "html", "css", "json", "txt", "md"], label_visibility="collapsed")
+        file_context = ""
+        if uploaded_file:
+            try:
+                file_context = uploaded_file.read().decode("utf-8")
+                st.caption(f"✅ Attached `{uploaded_file.name}`")
+            except Exception:
+                pass
+
+    for message in current_chat["messages"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Ask anything from quick syntax to complex architecture..."):
+        full_prompt = f"Attached File (`{uploaded_file.name}`):\n```\n{file_context}\n```\n\nTask: {prompt}" if file_context else prompt
+
+        if not current_chat["messages"]:
+            clean_t = prompt.strip().replace("\n", " ")
+            current_chat["title"] = (clean_t[:24] + "...") if len(clean_t) > 24 else clean_t
+
+        current_chat["messages"].append({"role": "user", "content": full_prompt})
+        db["users"][user_email]["prompts"] = db["users"][user_email].get("prompts", 0) + 1
+        save_db(db)
+
+        with st.chat_message("user"):
+            st.markdown(full_prompt)
+
+        sys_directive = (
+            f"You are VOID AI operating as {persona_mode}. "
+            f"Depth mode: {task_depth}. Provide clean, well-structured, high-precision output."
+        )
+
+        with st.chat_message("assistant"):
+            with st.spinner("Synthesizing..."):
+                reply, err = call_void_ai(model, sys_directive, current_chat["messages"], temperature, max_tokens)
+                if reply:
+                    st.markdown(reply)
+                    current_chat["messages"].append({"role": "assistant", "content": reply})
+                    save_db(db)
+                else:
+                    st.error(err)
+
+# ==========================================
+# INTERFACE 2: LIVE WEB & UI BUILDER
+# ==========================================
+with tab_studio:
+    st.markdown("#### ⚡ Instant Web App & Component Generator")
+    st.caption("Describe any web tool, mini-game, calculator, or UI layout—VOID will code it and render a live interactive preview right here.")
+    
+    ui_prompt = st.text_area(
+        "Describe what to build:",
+        placeholder="E.g., Build a sleek dark-mode Pomodoro timer with neon accents, start/reset buttons, and sound visualizers...",
+        height=90
+    )
+    
+    if st.button("🚀 Build & Launch Live Preview", type="primary"):
+        if not ui_prompt:
+            st.warning("Please describe what you want to build first.")
+        else:
+            builder_sys = (
+                "You are an elite frontend developer. Output ONLY a single, complete, self-contained HTML file "
+                "(including embedded <style> CSS and <script> JS). Do NOT wrap it in markdown explanations—just output raw HTML code inside ```html ... ```."
+            )
+            with st.spinner("Compiling HTML/CSS/JS & rendering preview..."):
+                res, err = call_void_ai(model, builder_sys, [{"role": "user", "content": ui_prompt}], 0.3, max_tokens)
+                if res:
+                    # Extract raw HTML if wrapped in code blocks
+                    clean_html = res
+                    if "```html" in res:
+                        clean_html = res.split("```html")[1].split("```")[0].strip()
+                    elif "```" in res:
+                        clean_html = res.split("```")[1].split("```")[0].strip()
+                    st.session_state.last_built_html = clean_html
+                else:
+                    st.error(err)
+
+    if "last_built_html" in st.session_state:
+        p_col1, p_col2 = st.columns([3, 2])
+        with p_col1:
+            st.markdown("##### 🖥️ Live Interactive Preview")
+            components.html(st.session_state.last_built_html, height=460, scrolling=True)
+        with p_col2:
+            st.markdown("##### 📄 Generated Source Code")
+            st.download_button(
+                "📥 Download index.html",
+                st.session_state.last_built_html,
+                file_name="index.html",
+                mime="text/html",
+                use_container_width=True
+            )
+            st.code(st.session_state.last_built_html, language="html")
+
+# ==========================================
+# INTERFACE 3: SIDE-BY-SIDE CODE LAB
+# ==========================================
+with tab_lab:
+    st.markdown("#### 🛠️ Side-by-Side Code Refactor & Bug Lab")
+    st.caption("Paste your code on the left, select an operation, and get the upgraded version on the right.")
+    
+    lab_action = st.selectbox(
+        "Select Operation",
+        [
+            "🐞 Find & Fix All Bugs",
+            "🚀 Optimize for Maximum Speed & Cleanliness",
+            "🛡️ Audit Security & Add Error Handling",
+            "📝 Add Professional Documentation & Comments",
+            "🔄 Convert to Python / JavaScript / C++"
+        ]
+    )
+    
+    left_col, right_col = st.columns(2)
+    with left_col:
+        raw_code = st.text_area("📥 Input Code:", height=320, placeholder="Paste your code or error traceback here...")
+        run_lab = st.button("⚡ Execute Lab Operation", type="primary", use_container_width=True)
+        
+    with right_col:
+        st.markdown("**📤 Output Result:**")
+        if run_lab and raw_code:
+            lab_sys = f"You are an expert code refactoring engine. Perform this exact operation on the user's code: {lab_action}. Explain key changes briefly, then provide the complete updated code."
+            with st.spinner("Analyzing & refactoring code..."):
+                lab_res, lab_err = call_void_ai(model, lab_sys, [{"role": "user", "content": raw_code}], 0.1, max_tokens)
+                if lab_res:
+                    st.markdown(lab_res)
+                else:
+                    st.error(lab_err)
+        elif not raw_code:
+            st.info("Paste your code on the left and click Execute to see the transformed result here.")
