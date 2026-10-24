@@ -18,15 +18,16 @@ st.title("VOID // AI Hub")
 st.caption("Shared Elite Coding & Design Assistant")
 st.markdown("---")
 
-# Securely load your API key from Streamlit Secrets (Friends cannot see or access this)
+# Securely load your API key from Streamlit Secrets
 try:
     API_KEY = st.secrets["OPENROUTER_API_KEY"]
 except Exception:
     API_KEY = ""
 
-# Sidebar settings for model selection
+# Sidebar Settings & Customization Controls
 with st.sidebar:
-    st.subheader("⚙️ Settings")
+    st.subheader("⚙️ Configuration")
+    
     model = st.selectbox(
         "Choose Model",
         [
@@ -42,6 +43,30 @@ with st.sidebar:
     )
     
     st.markdown("---")
+    st.subheader("🎛️ Fine-Tuning")
+    
+    # Customization sliders for control
+    temperature = st.slider("Temperature (Creativity)", min_value=0.0, max_value=1.0, value=0.2, step=0.1)
+    max_tokens = st.slider("Max Response Tokens", min_value=250, max_value=4000, value=1000, step=250)
+    
+    # Preset base instructions mapped to modes
+    system_prompts = {
+        "Coder": "You are an elite software engineer. Write clean, production-ready code.",
+        "Architect": "You are a systems architect. Outline structure and logic clearly.",
+        "Debugger": "You are an expert debugger. Isolate flaws and provide fixed code.",
+        "UI Designer": "You are a frontend designer. Focus on aesthetic layouts and CSS styling."
+    }
+    
+    # Allow customizing the system prompt dynamically
+    custom_system_prompt = st.text_area("System Persona Prompt", value=system_prompts[mode], height=100)
+    
+    st.markdown("---")
+    
+    # Chat History Management (Save / Clear feature)
+    if st.button("🗑️ Clear Chat History", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+        
     st.markdown("🔒 **Protected Session**<br>Powered by VOID Framework", unsafe_allow_html=True)
 
 # Initialize chat history in session state
@@ -53,7 +78,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Chat input bar at the bottom (just like ChatGPT)
+# Chat input bar at the bottom
 if prompt := st.chat_input("Ask for code, architecture, or design layout..."):
     if not API_KEY:
         st.error("⚠️ API Key is missing in app secrets. Please configure it in Streamlit settings.")
@@ -63,14 +88,6 @@ if prompt := st.chat_input("Ask for code, architecture, or design layout..."):
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Define system prompts based on mode
-        system_prompts = {
-            "Coder": "You are an elite software engineer. Write clean, production-ready code.",
-            "Architect": "You are a systems architect. Outline structure and logic clearly.",
-            "Debugger": "You are an expert debugger. Isolate flaws and provide fixed code.",
-            "UI Designer": "You are a frontend designer. Focus on aesthetic layouts and CSS styling."
-        }
-        
         # Prepare API payload
         headers = {
             "Authorization": f"Bearer {API_KEY.strip()}",
@@ -79,14 +96,16 @@ if prompt := st.chat_input("Ask for code, architecture, or design layout..."):
             "X-Title": "VOID AI Hub"
         }
         
-        # Send system prompt + user chat history to OpenRouter
-        messages_payload = [{"role": "system", "content": system_prompts[mode]}]
+        # Send customized system prompt + user chat history
+        messages_payload = [{"role": "system", "content": custom_system_prompt}]
         for m in st.session_state.messages:
             messages_payload.append({"role": m["role"], "content": m["content"]})
             
         data = {
             "model": model,
-            "messages": messages_payload
+            "messages": messages_payload,
+            "temperature": temperature,
+            "max_tokens": max_tokens
         }
 
         # Generate AI response
@@ -98,7 +117,7 @@ if prompt := st.chat_input("Ask for code, architecture, or design layout..."):
                     if response.status_code == 200:
                         result = response.json()["choices"][0]["message"]["content"]
                         st.markdown(result)
-                        # Save assistant response to history
+                        # Save assistant response to history state
                         st.session_state.messages.append({"role": "assistant", "content": result})
                     else:
                         st.error(f"API Error ({response.status_code}): {response.text}")
