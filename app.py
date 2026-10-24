@@ -6,6 +6,10 @@ import os
 import uuid
 import base64
 import re
+import random
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 # --- 1. AUTO-GENERATE CUSTOM VOID LOGO FILE ---
@@ -95,7 +99,7 @@ header[data-testid="stHeader"] { background: transparent !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. PERSISTENT DATABASE & API ENGINE ---
+# --- 3. PERSISTENT DATABASE & SECRETS ---
 DB_FILE = "void_hub_db.json"
 
 def load_db():
@@ -121,9 +125,57 @@ try:
 except Exception:
     API_KEY = ""
 
-def call_void_ai(model_slug, system_prompt, messages_list, temp=0.2, tokens=1400):
+try:
+    GMAIL_USER = st.secrets["GMAIL_USER"]
+    GMAIL_PASS = st.secrets["GMAIL_APP_PASSWORD"]
+except Exception:
+    GMAIL_USER = ""
+    GMAIL_PASS = ""
+
+def send_otp_email(receiver_email, otp_code):
+    if not GMAIL_USER or not GMAIL_PASS:
+        return False, "Gmail credentials missing in Streamlit Secrets."
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = GMAIL_USER
+        msg['To'] = receiver_email
+        msg['Subject'] = "🔐 VOID Studio - Your Login Verification Code"
+        
+        body = f"""
+        Hello,
+        
+        Your verification code to access VOID Studio is:
+        
+        {otp_code}
+        
+        Enter this code on the verification screen to proceed.
+        
+        - VOID Security Protocol
+        """
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(GMAIL_USER, GMAIL_PASS)
+        server.sendmail(GMAIL_USER, receiver_email, msg.as_string())
+        server.quit()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+# Map the 3 Cosmic Objects to underlying engine slugs safely
+COSMIC_OBJECTS = {
+    "🌙 Void Moon (Swift & Light)": "google/gemini-2.5-flash",
+    "🪐 Nebula Core (Deep Logic)": "deepseek/deepseek-chat",
+    "☀️ Supernova X (Master Architect)": "qwen/qwen-2.5-coder-32b-instruct"
+}
+
+def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.2, tokens=1400):
     if not API_KEY:
         return None, "⚠️ Master API Key missing in Streamlit Secrets (`OPENROUTER_API_KEY`)."
+    
+    target_slug = COSMIC_OBJECTS.get(cosmic_choice, "google/gemini-2.5-flash")
+    
     headers = {
         "Authorization": f"Bearer {API_KEY.strip()}",
         "Content-Type": "application/json",
@@ -132,7 +184,7 @@ def call_void_ai(model_slug, system_prompt, messages_list, temp=0.2, tokens=1400
     }
     payload = [{"role": "system", "content": system_prompt}] + messages_list
     data = {
-        "model": model_slug,
+        "model": target_slug,
         "messages": payload,
         "temperature": temp,
         "max_tokens": tokens
@@ -141,38 +193,73 @@ def call_void_ai(model_slug, system_prompt, messages_list, temp=0.2, tokens=1400
         r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"], None
-        return None, f"API Error ({r.status_code}): {r.text}"
+        return None, f"Resonance Error ({r.status_code}): {r.text}"
     except Exception as e:
-        return None, f"Connection Failed: {e}"
+        return None, f"Cosmic Connection Failed: {e}"
 
 def extract_code_blocks(markdown_text):
     pattern = r"```(\w+)?\n(.*?)```"
     return re.findall(pattern, markdown_text, re.DOTALL)
 
-# --- 4. EMAIL AUTHENTICATION GATE ---
+# --- 4. REAL-TIME OTP AUTHENTICATION GATE ---
 if "user_email" not in st.session_state:
-    st.markdown(f'<div class="gemini-hero"><img src="{LOGO_B64}" width="68" style="margin-bottom:12px;"/><div class="gemini-gradient">Welcome to VOID</div><div class="gemini-sub">Next-Gen AI Studio, Live Web Canvas & Code Lab</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="gemini-hero"><img src="{LOGO_B64}" width="68" style="margin-bottom:12px;"/><div class="gemini-gradient">Welcome to VOID</div><div class="gemini-sub">Secure Email OTP Authentication Gateway</div></div>', unsafe_allow_html=True)
+    
     c1, c2, c3 = st.columns([1, 1.3, 1])
     with c2:
-        with st.form("auth_gate"):
-            email_input = st.text_input("Sign in with your Email", placeholder="name@example.com").strip().lower()
-            submit = st.form_submit_button("Launch VOID Studio", type="primary", use_container_width=True)
-            if submit:
-                if "@" in email_input and "." in email_input and len(email_input) > 5:
-                    now_str = datetime.now().strftime("%b %d, %H:%M")
-                    if email_input not in db["users"]:
-                        db["users"][email_input] = {"joined": now_str, "last_active": now_str, "prompts": 0}
+        if "pending_email" not in st.session_state:
+            with st.form("email_form"):
+                email_input = st.text_input("Enter your Email Address", placeholder="name@example.com").strip().lower()
+                send_btn = st.form_submit_button("Send Verification Code", type="primary", use_container_width=True)
+                
+                if send_btn:
+                    if "@" in email_input and "." in email_input and len(email_input) > 5:
+                        generated_otp = str(random.randint(100000, 999999))
+                        success, err = send_otp_email(email_input, generated_otp)
+                        if success:
+                            st.session_state.pending_email = email_input
+                            st.session_state.target_otp = generated_otp
+                            st.success(f"Verification code sent to `{email_input}`!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to send email: {err}")
                     else:
-                        db["users"][email_input]["last_active"] = now_str
-                    if email_input not in db["chats"] or not db["chats"][email_input]:
-                        first_id = str(uuid.uuid4())[:8]
-                        db["chats"][email_input] = {first_id: {"title": "New Chat", "messages": []}}
-                    save_db(db)
-                    st.session_state.user_email = email_input
-                    st.session_state.current_chat_id = list(db["chats"][email_input].keys())[-1]
+                        st.error("Please enter a valid email address.")
+        else:
+            st.info(f"Code sent to: **{st.session_state.pending_email}**")
+            with st.form("otp_form"):
+                entered_otp = st.text_input("Enter 6-Digit OTP Code", placeholder="123456", max_chars=6)
+                verify_btn = st.form_submit_button("Verify & Enter Studio", type="primary", use_container_width=True)
+                back_btn = st.form_submit_button("Use a Different Email")
+                
+                if back_btn:
+                    del st.session_state.pending_email
+                    del st.session_state.target_otp
                     st.rerun()
-                else:
-                    st.error("Please enter a valid email address.")
+                    
+                if verify_btn:
+                    if entered_otp.strip() == st.session_state.target_otp:
+                        email_input = st.session_state.pending_email
+                        now_str = datetime.now().strftime("%b %d, %H:%M")
+                        
+                        if email_input not in db["users"]:
+                            db["users"][email_input] = {"joined": now_str, "last_active": now_str, "prompts": 0}
+                        else:
+                            db["users"][email_input]["last_active"] = now_str
+                            
+                        if email_input not in db["chats"] or not db["chats"][email_input]:
+                            first_id = str(uuid.uuid4())[:8]
+                            db["chats"][email_input] = {first_id: {"title": "New Chat", "messages": []}}
+                            
+                        save_db(db)
+                        st.session_state.user_email = email_input
+                        st.session_state.current_chat_id = list(db["chats"][email_input].keys())[-1]
+                        
+                        del st.session_state.pending_email
+                        del st.session_state.target_otp
+                        st.rerun()
+                    else:
+                        st.error("❌ Incorrect OTP code. Please check your inbox and try again.")
     st.stop()
 
 # Active User & Session State
@@ -190,18 +277,18 @@ if "current_chat_id" not in st.session_state or st.session_state.current_chat_id
 current_chat_id = st.session_state.current_chat_id
 current_chat = user_chats[current_chat_id]
 
-# --- 5. LEFT DRAWER (GEMINI-STYLE SIDEBAR) ---
+# --- 5. LEFT DRAWER (SIDEBAR) ---
 with st.sidebar:
     st.markdown(f'<div class="topbar-brand"><img src="{LOGO_B64}" width="32"/><span class="topbar-title">VOID</span><span class="topbar-pill">ULTRA</span></div>', unsafe_allow_html=True)
 
-    if st.button("✦ New Chat", type="primary", use_container_width=True):
+    if st.button("✦ New Thread", type="primary", use_container_width=True):
         new_id = str(uuid.uuid4())[:8]
-        user_chats[new_id] = {"title": "New Chat", "messages": []}
+        user_chats[new_id] = {"title": "New Thread", "messages": []}
         st.session_state.current_chat_id = new_id
         save_db(db)
         st.rerun()
 
-    st.markdown("##### Recent Chats")
+    st.markdown("##### Recent Threads")
     for c_id, c_data in reversed(list(user_chats.items())):
         col_t, col_d = st.columns([5, 1])
         with col_t:
@@ -225,7 +312,7 @@ with st.sidebar:
         export_md = f"# {current_chat['title']}\n\n"
         for m in current_chat["messages"]:
             export_md += f"### {m['role'].upper()}:\n{m['content']}\n\n---\n\n"
-        st.download_button("📥 Export Chat (.md)", export_md, file_name=f"void_{current_chat_id}.md", use_container_width=True)
+        st.download_button("📥 Export Thread (.md)", export_md, file_name=f"void_{current_chat_id}.md", use_container_width=True)
 
     with st.expander(f"👥 Crew Activity ({len(db['users'])})"):
         for u_mail, u_info in db["users"].items():
@@ -236,7 +323,7 @@ with st.sidebar:
         del st.session_state.user_email
         st.rerun()
 
-# --- 6. TOP CONTROL BAR & INTERFACE SWITCHER ---
+# --- 6. TOP CONTROL BAR & COSMIC SWITCHER ---
 top_c1, top_c2, top_c3, top_c4 = st.columns([1.8, 1.8, 1.8, 1.2])
 with top_c1:
     ui_mode = st.selectbox(
@@ -245,9 +332,9 @@ with top_c1:
         label_visibility="collapsed"
     )
 with top_c2:
-    model = st.selectbox(
-        "Model",
-        ["google/gemini-2.5-flash", "deepseek/deepseek-chat", "qwen/qwen-2.5-coder-32b-instruct"],
+    cosmic_entity = st.selectbox(
+        "Cosmic Entity",
+        list(COSMIC_OBJECTS.keys()),
         label_visibility="collapsed"
     )
 with top_c3:
@@ -273,7 +360,7 @@ with top_c4:
         max_tokens = st.slider("Max Output Tokens", 400, 3500, 1500, 100)
 
 # =========================================================
-# INTERFACE 1: GEMINI-STYLE ASSISTANT + SPLIT-SCREEN CANVAS
+# INTERFACE 1: ASSISTANT + SPLIT-SCREEN CANVAS
 # =========================================================
 if ui_mode == "✦ Assistant & Canvas":
     if canvas_open:
@@ -326,13 +413,13 @@ if ui_mode == "✦ Assistant & Canvas":
                 st.markdown(full_user_prompt)
 
             sys_prompt = (
-                f"You are VOID, an elite AI assistant operating in '{persona}' mode. "
+                f"You are VOID, an elite cosmic architecture entity operating in '{persona}' mode. "
                 f"Reasoning depth: {task_depth}. If asked to build a web UI, game, or component, include a complete self-contained ```html code block so the user can preview it live in VOID Canvas."
             )
 
             with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    reply, err = call_void_ai(model, sys_prompt, current_chat["messages"], temperature, max_tokens)
+                with st.spinner("Synthesizing resonance..."):
+                    reply, err = call_void_engine(cosmic_entity, sys_prompt, current_chat["messages"], temperature, max_tokens)
                     if reply:
                         st.markdown(reply)
                         current_chat["messages"].append({"role": "assistant", "content": reply})
@@ -382,7 +469,7 @@ elif ui_mode == "⚡ Live Web App Studio":
         if ui_prompt:
             builder_sys = "Output ONLY a single, complete, self-contained HTML file (with embedded <style> CSS and <script> JS) inside ```html ... ```."
             with st.spinner("Building interactive web app..."):
-                res, err = call_void_ai(model, builder_sys, [{"role": "user", "content": ui_prompt}], 0.3, max_tokens)
+                res, err = call_void_engine(cosmic_entity, builder_sys, [{"role": "user", "content": ui_prompt}], 0.3, max_tokens)
                 if res:
                     clean_html = res.split("```html")[1].split("```")[0].strip() if "```html" in res else (res.split("```")[1].split("```")[0].strip() if "```" in res else res)
                     st.session_state.studio_html = clean_html
@@ -413,8 +500,8 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
         st.markdown("**📤 Transformed Output:**")
         if run_lab and raw_code:
             lab_sys = f"Perform this exact operation on the user's code: {lab_action}. Briefly highlight key fixes, then provide the complete upgraded code."
-            with st.spinner("Refactoring..."):
-                lab_res, lab_err = call_void_ai(model, lab_sys, [{"role": "user", "content": raw_code}], 0.1, max_tokens)
+            with st.spinner("Refactoring code..."):
+                lab_res, lab_err = call_void_engine(cosmic_entity, lab_sys, [{"role": "user", "content": raw_code}], 0.1, max_tokens)
                 if lab_res:
                     st.markdown(lab_res)
                 else:
