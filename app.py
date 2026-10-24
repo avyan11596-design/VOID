@@ -7,9 +7,6 @@ import uuid
 import base64
 import re
 import random
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 # --- 1. AUTO-GENERATE CUSTOM VOID LOGO FILE ---
@@ -126,40 +123,37 @@ except Exception:
     API_KEY = ""
 
 try:
-    GMAIL_USER = st.secrets["GMAIL_USER"]
-    GMAIL_PASS = st.secrets["GMAIL_APP_PASSWORD"]
+    RESEND_API_KEY = st.secrets["RESEND_API_KEY"]
 except Exception:
-    GMAIL_USER = ""
-    GMAIL_PASS = ""
+    RESEND_API_KEY = ""
 
-# Secure SSL SMTP Connection on Port 465
+# Reliable HTTPS Email Dispatch via Resend (Bypasses all cloud SMTP blocks)
 def send_otp_email(receiver_email, otp_code):
-    if not GMAIL_USER or not GMAIL_PASS:
-        return False, "Gmail credentials missing in Streamlit Secrets."
+    if not RESEND_API_KEY:
+        return False, "Resend API Key missing in Streamlit Secrets."
     try:
-        msg = MIMEMultipart()
-        msg['From'] = GMAIL_USER
-        msg['To'] = receiver_email
-        msg['Subject'] = "🔐 VOID Studio - Your Login Verification Code"
-        
-        body = f"""
-        Hello,
-        
-        Your verification code to access VOID Studio is:
-        
-        {otp_code}
-        
-        Enter this code on the verification screen to proceed.
-        
-        - VOID Security Protocol
-        """
-        msg.attach(MIMEText(body, 'plain'))
-        
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(GMAIL_USER, GMAIL_PASS)
-        server.sendmail(GMAIL_USER, receiver_email, msg.as_string())
-        server.quit()
-        return True, None
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY.strip()}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "from": "VOID Studio <onboarding@resend.dev>",
+            "to": [receiver_email],
+            "subject": "🔐 VOID Studio - Your Login Verification Code",
+            "html": f"""
+            <div style="font-family: sans-serif; background: #0e1117; color: #fff; padding: 24px; border-radius: 12px;">
+                <h2 style="color: #4facfe;">VOID Security Protocol</h2>
+                <p>Your verification code to access VOID Studio is:</p>
+                <div style="font-size: 32px; font-weight: bold; letter-spacing: 4px; color: #a18cd1; margin: 20px 0;">{otp_code}</div>
+                <p style="opacity: 0.6; font-size: 12px;">If you did not request this, please ignore this email.</p>
+            </div>
+            """
+        }
+        r = requests.post("https://api.resend.com/emails", headers=headers, json=data, timeout=30)
+        if r.status_code == 200:
+            return True, None
+        else:
+            return False, f"API Error ({r.status_code}): {r.text}"
     except Exception as e:
         return False, str(e)
 
@@ -507,4 +501,4 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
                 else:
                     st.error(lab_err)
         else:
-            st.info("Paste code on the left and click Transform to view the upgraded code side-by-side.")
+            st.info("Paste code on the left and click Transform to view the upgraded code side-by-side.")        
