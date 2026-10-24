@@ -10,7 +10,7 @@ import random
 from datetime import datetime
 
 # --- 1. AUTO-GENERATE CUSTOM VOID LOGO FILE ---
-SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4facfe"/><stop offset="100%" stop-color="#9b51e0"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#0e1117" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
+SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4facfe"/><stop offset="100%" stop-color="#9b51e0"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#0b0e14" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
 LOGO_B64 = "data:image/svg+xml;base64," + base64.b64encode(SVG_RAW.encode("utf-8")).decode("utf-8")
 
 if not os.path.exists("void_logo.svg"):
@@ -35,9 +35,10 @@ try:
 except Exception:
     pass
 
-# --- 2. GEMINI-STYLE ULTRA-CLEAN CSS ---
+# --- 2. ADVANCED FUTURISTIC UI & THEME CSS ---
 st.markdown("""
 <style>
+/* Global Resets & Clean Layout */
 div[data-testid="stToolbarActions"] { display: none !important; }
 div[data-testid="stAppDeployButton"] { display: none !important; }
 div[data-testid="stDecoration"] { display: none !important; }
@@ -47,51 +48,81 @@ footer { visibility: hidden !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
 
 .block-container {
-    padding-top: 1rem !important;
-    padding-bottom: 2rem !important;
-    max-width: 1120px;
+    padding-top: 1.2rem !important;
+    padding-bottom: 2.5rem !important;
+    max-width: 1160px;
 }
+
+/* Glassmorphism Sidebar */
+section[data-testid="stSidebar"] {
+    background-color: #080a0f;
+    border-right: 1px solid rgba(79, 172, 254, 0.1);
+}
+
+/* Chat Bubbles Styling */
 .stChatMessage {
-    border-radius: 16px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
-    border: 1px solid rgba(128, 128, 128, 0.14);
+    border-radius: 18px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(79, 172, 254, 0.12);
+    background: rgba(14, 17, 23, 0.6);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
-.gemini-hero {
+
+/* Hero Section */
+.void-hero {
     text-align: center;
-    padding: 28px 10px 20px 10px;
+    padding: 32px 10px 24px 10px;
 }
-.gemini-gradient {
-    font-size: 2.5rem;
-    font-weight: 700;
-    background: linear-gradient(90deg, #4facfe 0%, #a18cd1 50%, #fbc2eb 100%);
+.void-gradient {
+    font-size: 2.8rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 40%, #9b51e0 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
-.gemini-sub {
-    font-size: 1.1rem;
-    opacity: 0.68;
-    margin-bottom: 22px;
+.void-sub {
+    font-size: 1.15rem;
+    color: #8b949e;
+    margin-bottom: 24px;
 }
+
+/* Topbar Brand Badge */
 .topbar-brand {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-left: 4px;
 }
 .topbar-title {
-    font-size: 1.35rem;
-    font-weight: 700;
-    letter-spacing: 1.5px;
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: #ffffff;
 }
 .topbar-pill {
-    font-size: 0.7rem;
-    padding: 2px 8px;
+    font-size: 0.650rem;
+    padding: 3px 9px;
     border-radius: 99px;
-    background: rgba(79, 172, 254, 0.15);
+    background: rgba(79, 172, 254, 0.1);
     color: #4facfe;
-    border: 1px solid rgba(79, 172, 254, 0.35);
+    border: 1px solid rgba(79, 172, 254, 0.3);
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* Quick Action Cards */
+.stButton button {
+    border-radius: 12px !important;
+    border: 1px solid rgba(128, 128, 128, 0.2) !important;
+    transition: all 0.25s ease !important;
+}
+.stButton button:hover {
+    border-color: #4facfe !important;
+    box-shadow: 0 0 12px rgba(79, 172, 254, 0.2) !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -185,9 +216,9 @@ def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.2, toke
 def extract_code_blocks(markdown_text):
     return re.findall(r"```(\w+)?\n(.*?)```", markdown_text, re.DOTALL)
 
-# --- 4. REAL-TIME OTP AUTHENTICATION GATE ---
+# --- 4. SECURE AUTHENTICATION GATE ---
 if "user_email" not in st.session_state:
-    st.markdown(f'<div class="gemini-hero"><img src="{LOGO_B64}" width="68" style="margin-bottom:12px;"/><div class="gemini-gradient">Welcome to VOID</div><div class="gemini-sub">Secure Email OTP Authentication Gateway</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="void-hero"><img src="{LOGO_B64}" width="72" style="margin-bottom:14px;"/><div class="void-gradient">Welcome to VOID</div><div class="void-sub">Secure Email OTP Authentication Gateway</div></div>', unsafe_allow_html=True)
     
     c1, c2, c3 = st.columns([1, 1.3, 1])
     with c2:
@@ -367,7 +398,7 @@ if ui_mode == "✦ Assistant & Canvas":
 
     with chat_col:
         if not current_chat["messages"]:
-            st.markdown(f'<div class="gemini-hero"><img src="{LOGO_B64}" width="56" style="margin-bottom:10px;"/><div class="gemini-gradient">Hello, {user_name}</div><div class="gemini-sub">What are we building, designing, or solving today?</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="void-hero"><img src="{LOGO_B64}" width="60" style="margin-bottom:12px;"/><div class="void-gradient">Hello, {user_name}</div><div class="void-sub">What are we building, designing, or solving today?</div></div>', unsafe_allow_html=True)
 
             s1, s2, s3, s4 = st.columns(4)
             with s1:
