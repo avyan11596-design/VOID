@@ -123,37 +123,34 @@ except Exception:
     API_KEY = ""
 
 try:
-    RESEND_API_KEY = st.secrets["RESEND_API_KEY"]
+    EMAILJS_SERVICE_ID = st.secrets["EMAILJS_SERVICE_ID"]
+    EMAILJS_TEMPLATE_ID = st.secrets["EMAILJS_TEMPLATE_ID"]
+    EMAILJS_PUBLIC_KEY = st.secrets["EMAILJS_PUBLIC_KEY"]
 except Exception:
-    RESEND_API_KEY = ""
+    EMAILJS_SERVICE_ID = ""
+    EMAILJS_TEMPLATE_ID = ""
+    EMAILJS_PUBLIC_KEY = ""
 
-# Reliable HTTPS Email Dispatch via Resend (Bypasses all cloud SMTP blocks)
+# Send real email via EmailJS HTTPS REST API (Comes directly from your Gmail)
 def send_otp_email(receiver_email, otp_code):
-    if not RESEND_API_KEY:
-        return False, "Resend API Key missing in Streamlit Secrets."
+    if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
+        return False, "EmailJS credentials missing in Streamlit Secrets."
     try:
-        headers = {
-            "Authorization": f"Bearer {RESEND_API_KEY.strip()}",
-            "Content-Type": "application/json"
+        url = "https://api.emailjs.com/api/v1.0/email/send"
+        payload = {
+            "service_id": EMAILJS_SERVICE_ID.strip(),
+            "template_id": EMAILJS_TEMPLATE_ID.strip(),
+            "user_id": EMAILJS_PUBLIC_KEY.strip(),
+            "template_params": {
+                "to_email": receiver_email,
+                "otp_code": otp_code
+            }
         }
-        data = {
-            "from": "VOID Studio <onboarding@resend.dev>",
-            "to": [receiver_email],
-            "subject": "🔐 VOID Studio - Your Login Verification Code",
-            "html": f"""
-            <div style="font-family: sans-serif; background: #0e1117; color: #fff; padding: 24px; border-radius: 12px;">
-                <h2 style="color: #4facfe;">VOID Security Protocol</h2>
-                <p>Your verification code to access VOID Studio is:</p>
-                <div style="font-size: 32px; font-weight: bold; letter-spacing: 4px; color: #a18cd1; margin: 20px 0;">{otp_code}</div>
-                <p style="opacity: 0.6; font-size: 12px;">If you did not request this, please ignore this email.</p>
-            </div>
-            """
-        }
-        r = requests.post("https://api.resend.com/emails", headers=headers, json=data, timeout=30)
+        r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200:
             return True, None
         else:
-            return False, f"API Error ({r.status_code}): {r.text}"
+            return False, r.text
     except Exception as e:
         return False, str(e)
 
@@ -167,9 +164,7 @@ COSMIC_OBJECTS = {
 def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.2, tokens=1400):
     if not API_KEY:
         return None, "⚠️ Master API Key missing in Streamlit Secrets (`OPENROUTER_API_KEY`)."
-    
     target_slug = COSMIC_OBJECTS.get(cosmic_choice, "google/gemini-2.5-flash")
-    
     headers = {
         "Authorization": f"Bearer {API_KEY.strip()}",
         "Content-Type": "application/json",
@@ -177,12 +172,7 @@ def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.2, toke
         "X-Title": "VOID"
     }
     payload = [{"role": "system", "content": system_prompt}] + messages_list
-    data = {
-        "model": target_slug,
-        "messages": payload,
-        "temperature": temp,
-        "max_tokens": tokens
-    }
+    data = {"model": target_slug, "messages": payload, "temperature": temp, "max_tokens": tokens}
     try:
         r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
         if r.status_code == 200:
@@ -192,8 +182,7 @@ def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.2, toke
         return None, f"Cosmic Connection Failed: {e}"
 
 def extract_code_blocks(markdown_text):
-    pattern = r"```(\w+)?\n(.*?)```"
-    return re.findall(pattern, markdown_text, re.DOTALL)
+    return re.findall(r"```(\w+)?\n(.*?)```", markdown_text, re.DOTALL)
 
 # --- 4. REAL-TIME OTP AUTHENTICATION GATE ---
 if "user_email" not in st.session_state:
@@ -213,14 +202,14 @@ if "user_email" not in st.session_state:
                         if success:
                             st.session_state.pending_email = email_input
                             st.session_state.target_otp = generated_otp
-                            st.success(f"Verification code sent to `{email_input}`!")
+                            st.success(f"Verification code successfully sent to `{email_input}` via email!")
                             st.rerun()
                         else:
                             st.error(f"Failed to send email: {err}")
                     else:
                         st.error("Please enter a valid email address.")
         else:
-            st.info(f"Code sent to: **{st.session_state.pending_email}**")
+            st.info(f"Email sent to: **{st.session_state.pending_email}**. Check your inbox or spam folder.")
             with st.form("otp_form"):
                 entered_otp = st.text_input("Enter 6-Digit OTP Code", placeholder="123456", max_chars=6)
                 verify_btn = st.form_submit_button("Verify & Enter Studio", type="primary", use_container_width=True)
@@ -501,4 +490,4 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
                 else:
                     st.error(lab_err)
         else:
-            st.info("Paste code on the left and click Transform to view the upgraded code side-by-side.")        
+            st.info("Paste code on the left and click Transform to view the upgraded code side-by-side.")    
