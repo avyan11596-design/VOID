@@ -7,14 +7,11 @@ st.title("VOID // AI Hub")
 st.caption("Minimalist Coding & Design Assistant")
 st.markdown("---")
 
-# Safely load the key from Streamlit secrets
-try:
-    API_KEY = st.secrets["OPENROUTER_API_KEY"]
-except Exception:
-    API_KEY = ""
-
 with st.sidebar:
     st.subheader("Settings")
+    # Clean runtime input box (safe from GitHub scanners)
+    api_key = st.text_input("OpenRouter API Key", type="password", placeholder="sk-or-v1-...")
+    
     model = st.selectbox(
         "Model",
         [
@@ -23,6 +20,7 @@ with st.sidebar:
             "google/gemini-2.5-flash:free"
         ]
     )
+    
     mode = st.selectbox(
         "Mode",
         ["Coder", "Architect", "Debugger", "UI Designer"]
@@ -31,8 +29,8 @@ with st.sidebar:
 prompt = st.text_area("Enter your prompt or task:", height=130, placeholder="Write a clean Python script for...")
 
 if st.button("Generate", type="primary", use_container_width=True):
-    if not API_KEY:
-        st.warning("⚠️ API Key missing! Please add it to your Streamlit app secrets.")
+    if not api_key:
+        st.warning("⚠️ Please paste your OpenRouter API key in the sidebar.")
     elif not prompt:
         st.warning("⚠️ Please enter a prompt.")
     else:
@@ -45,7 +43,7 @@ if st.button("Generate", type="primary", use_container_width=True):
         
         with st.spinner("Processing request..."):
             headers = {
-                "Authorization": f"Bearer {API_KEY.strip()}",
+                "Authorization": f"Bearer {api_key.strip()}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://void-ai-hub.streamlit.app",
                 "X-Title": "VOID AI Hub"
