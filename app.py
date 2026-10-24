@@ -1,21 +1,17 @@
 import streamlit as st
 import requests
 
-# Minimalist Page Setup
 st.set_page_config(page_title="VOID // AI Hub", page_icon="⚡", layout="centered")
 
 st.title("VOID // AI Hub")
 st.caption("Minimalist Coding & Design Assistant")
 st.markdown("---")
 
-# Sidebar Configuration
 with st.sidebar:
     st.subheader("Settings")
+    # Leave this blank by default so it forces a clean entry
+    api_key = st.text_input("OpenRouter API Key", type="password", placeholder="sk-or-v1-...")
     
-    # Hardcoded or input key
-    api_key = st.text_input("OpenRouter API Key", value="PASTE_YOUR_KEY_HERE", type="password")
-    
-    # Using verified free-tier models to prevent 401/gateway balance errors
     model = st.selectbox(
         "Model",
         [
@@ -30,12 +26,11 @@ with st.sidebar:
         ["Coder", "Architect", "Debugger", "UI Designer"]
     )
 
-# Main Prompt Area
 prompt = st.text_area("Enter your prompt or task:", height=130, placeholder="Write a clean Python script for...")
 
 if st.button("Generate", type="primary", use_container_width=True):
-    if not api_key or api_key == "PASTE_YOUR_KEY_HERE":
-        st.warning("Please enter a valid OpenRouter API key in the sidebar.")
+    if not api_key:
+        st.warning("Please paste your OpenRouter API key into the sidebar.")
     elif not prompt:
         st.warning("Please enter a prompt.")
     else:
