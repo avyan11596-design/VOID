@@ -1,17 +1,19 @@
 import streamlit as st
 import requests
 
+# Minimalist configuration
 st.set_page_config(page_title="VOID // AI Hub", page_icon="⚡", layout="centered")
 
 st.title("VOID // AI Hub")
 st.caption("Minimalist Coding & Design Assistant")
 st.markdown("---")
 
+# PERMANENTLY BAKED-IN CONFIGURATION (No input box errors)
+API_KEY = "sk-or-v1-YOUR_ACTUAL_KEY_HERE"  # <-- sk-or-v1-cb27a917f5a6c9d4ae1b2f6cc0bde95f6088f895c992679268a0f75a36130e60Paste your exact OpenRouter key here inside the quotes
+
+# Sidebar options
 with st.sidebar:
     st.subheader("Settings")
-    # Leave this blank by default so it forces a clean entry
-    api_key = st.text_input("OpenRouter API Key", type="password", placeholder="sk-or-v1-...")
-    
     model = st.selectbox(
         "Model",
         [
@@ -20,19 +22,19 @@ with st.sidebar:
             "google/gemini-2.5-flash:free"
         ]
     )
-    
     mode = st.selectbox(
         "Mode",
         ["Coder", "Architect", "Debugger", "UI Designer"]
     )
 
+# Main Prompt Area
 prompt = st.text_area("Enter your prompt or task:", height=130, placeholder="Write a clean Python script for...")
 
 if st.button("Generate", type="primary", use_container_width=True):
-    if not api_key:
-        st.warning("Please paste your OpenRouter API key into the sidebar.")
+    if API_KEY == "sk-or-v1-YOUR_ACTUAL_KEY_HERE" or not API_KEY.startswith("sk-or-v1-"):
+        st.warning("⚠️ Please edit app.py on GitHub and insert your actual OpenRouter API key into the API_KEY variable.")
     elif not prompt:
-        st.warning("Please enter a prompt.")
+        st.warning("⚠️ Please enter a prompt.")
     else:
         system_prompts = {
             "Coder": "You are an elite software engineer. Write clean, production-ready code.",
@@ -41,9 +43,9 @@ if st.button("Generate", type="primary", use_container_width=True):
             "UI Designer": "You are a frontend designer. Focus on aesthetic layouts and CSS styling."
         }
         
-        with st.spinner("Processing..."):
+        with st.spinner("Processing request..."):
             headers = {
-                "Authorization": f"Bearer {api_key.strip()}",
+                "Authorization": f"Bearer {API_KEY.strip()}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://void-ai-hub.streamlit.app",
                 "X-Title": "VOID AI Hub"
@@ -65,6 +67,6 @@ if st.button("Generate", type="primary", use_container_width=True):
                     st.markdown("### Output")
                     st.markdown(result)
                 else:
-                    st.error(f"Error ({response.status_code}): {response.text}")
+                    st.error(f"API Error ({response.status_code}): {response.text}")
             except Exception as e:
                 st.error(f"Connection Failed: {e}")
