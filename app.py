@@ -126,12 +126,14 @@ try:
     EMAILJS_SERVICE_ID = st.secrets["EMAILJS_SERVICE_ID"]
     EMAILJS_TEMPLATE_ID = st.secrets["EMAILJS_TEMPLATE_ID"]
     EMAILJS_PUBLIC_KEY = st.secrets["EMAILJS_PUBLIC_KEY"]
+    EMAILJS_PRIVATE_KEY = st.secrets["EMAILJS_PRIVATE_KEY"]
 except Exception:
     EMAILJS_SERVICE_ID = ""
     EMAILJS_TEMPLATE_ID = ""
     EMAILJS_PUBLIC_KEY = ""
+    EMAILJS_PRIVATE_KEY = ""
 
-# Send real email via EmailJS HTTPS REST API (Comes directly from your Gmail)
+# Send real email via EmailJS HTTPS REST API with Private Key (Strict Mode)
 def send_otp_email(receiver_email, otp_code):
     if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
         return False, "EmailJS credentials missing in Streamlit Secrets."
@@ -141,6 +143,7 @@ def send_otp_email(receiver_email, otp_code):
             "service_id": EMAILJS_SERVICE_ID.strip(),
             "template_id": EMAILJS_TEMPLATE_ID.strip(),
             "user_id": EMAILJS_PUBLIC_KEY.strip(),
+            "accessToken": EMAILJS_PRIVATE_KEY.strip(),
             "template_params": {
                 "to_email": receiver_email,
                 "otp_code": otp_code
@@ -490,4 +493,4 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
                 else:
                     st.error(lab_err)
         else:
-            st.info("Paste code on the left and click Transform to view the upgraded code side-by-side.")    
+            st.info("Paste code on the left and click Transform to view the upgraded code side-by-side.")
