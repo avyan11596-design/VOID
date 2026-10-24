@@ -132,6 +132,7 @@ except Exception:
     GMAIL_USER = ""
     GMAIL_PASS = ""
 
+# Secure SSL SMTP Connection on Port 465
 def send_otp_email(receiver_email, otp_code):
     if not GMAIL_USER or not GMAIL_PASS:
         return False, "Gmail credentials missing in Streamlit Secrets."
@@ -154,8 +155,7 @@ def send_otp_email(receiver_email, otp_code):
         """
         msg.attach(MIMEText(body, 'plain'))
         
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, receiver_email, msg.as_string())
         server.quit()
@@ -163,7 +163,7 @@ def send_otp_email(receiver_email, otp_code):
     except Exception as e:
         return False, str(e)
 
-# Map the 3 Cosmic Objects to underlying engine slugs safely
+# Three Cosmic Entities mapped to engine slugs
 COSMIC_OBJECTS = {
     "🌙 Void Moon (Swift & Light)": "google/gemini-2.5-flash",
     "🪐 Nebula Core (Deep Logic)": "deepseek/deepseek-chat",
@@ -249,7 +249,7 @@ if "user_email" not in st.session_state:
                             
                         if email_input not in db["chats"] or not db["chats"][email_input]:
                             first_id = str(uuid.uuid4())[:8]
-                            db["chats"][email_input] = {first_id: {"title": "New Chat", "messages": []}}
+                            db["chats"][email_input] = {first_id: {"title": "New Thread", "messages": []}}
                             
                         save_db(db)
                         st.session_state.user_email = email_input
@@ -268,7 +268,7 @@ user_name = user_email.split("@")[0].capitalize()
 user_chats = db["chats"].setdefault(user_email, {})
 if not user_chats:
     new_id = str(uuid.uuid4())[:8]
-    user_chats[new_id] = {"title": "New Chat", "messages": []}
+    user_chats[new_id] = {"title": "New Thread", "messages": []}
     save_db(db)
 
 if "current_chat_id" not in st.session_state or st.session_state.current_chat_id not in user_chats:
