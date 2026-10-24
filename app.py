@@ -133,7 +133,6 @@ except Exception:
     EMAILJS_PUBLIC_KEY = ""
     EMAILJS_PRIVATE_KEY = ""
 
-# Send real email via EmailJS HTTPS REST API with Private Key (Strict Mode)
 def send_otp_email(receiver_email, otp_code):
     if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
         return False, "EmailJS credentials missing in Streamlit Secrets."
@@ -157,7 +156,6 @@ def send_otp_email(receiver_email, otp_code):
     except Exception as e:
         return False, str(e)
 
-# Three Cosmic Entities mapped to engine slugs
 COSMIC_OBJECTS = {
     "🌙 Void Moon (Swift & Light)": "google/gemini-2.5-flash",
     "🪐 Nebula Core (Deep Logic)": "deepseek/deepseek-chat",
@@ -299,6 +297,16 @@ with st.sidebar:
         for m in current_chat["messages"]:
             export_md += f"### {m['role'].upper()}:\n{m['content']}\n\n---\n\n"
         st.download_button("📥 Export Thread (.md)", export_md, file_name=f"void_{current_chat_id}.md", use_container_width=True)
+
+    with st.expander("👑 Founder Profile"):
+        st.markdown("""
+        **Avyan**  
+        *Founder & Lead Architect*  
+        
+        * **Age / Status:** 14 years old, Class 8 Student at Sunbeam School Varuna, Varanasi.
+        * **Vision:** Creator of the VOID workspace ecosystem and lightweight VoidOS.
+        * **Interests:** Author of *World Zero*, calisthenics training, and gaming (`NOTREFLEXGAMING05`).
+        """)
 
     with st.expander(f"👥 Crew Activity ({len(db['users'])})"):
         for u_mail, u_info in db["users"].items():
