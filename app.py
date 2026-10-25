@@ -36,7 +36,16 @@ try:
 except Exception:
     pass
 
-# --- 2. PURE VOID ULTRA-DARK GLASS CSS & SEO ---
+# Safe URL helper that automatically fixes missing colons ('https//' -> 'https://')
+def safe_url(u):
+    u = u.strip()
+    if u.startswith("https//"):
+        u = "https://" + u[len("https//"):]
+    elif u.startswith("http//"):
+        u = "http://" + u[len("http//"):]
+    return u
+
+# --- 2. FORCED PERMANENT DARK MODE & PURE VOID CSS ---
 st.markdown("""
 <head>
     <meta name="description" content="VOID is a next-generation digital workspace, scholastic codex, PDF/Slide forge, and live web studio architected by Avyan.">
@@ -44,6 +53,25 @@ st.markdown("""
     <meta name="author" content="Avyan">
 </head>
 <style>
+/* Force Deep Cosmic Dark Mode on all devices */
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+    background-color: #0b0e14 !important;
+    color: #f0f6fc !important;
+}
+[data-testid="stForm"] {
+    background-color: #111622 !important;
+    border: 1px solid rgba(79, 172, 254, 0.25) !important;
+    border-radius: 16px !important;
+    padding: 22px !important;
+}
+label, p, span, div {
+    color: #e6edf3;
+}
+input, textarea {
+    background-color: #161b26 !important;
+    color: #ffffff !important;
+}
+
 div[data-testid="stToolbarActions"] { display: none !important; }
 div[data-testid="stAppDeployButton"] { display: none !important; }
 div[data-testid="stDecoration"] { display: none !important; }
@@ -58,7 +86,7 @@ header[data-testid="stHeader"] { background: transparent !important; }
     max-width: 1380px;
 }
 section[data-testid="stSidebar"] {
-    background-color: #07090e;
+    background-color: #07090e !important;
     border-right: 1px solid rgba(79, 172, 254, 0.14);
 }
 .stChatMessage {
@@ -66,7 +94,7 @@ section[data-testid="stSidebar"] {
     padding: 16px 20px;
     margin-bottom: 12px;
     border: 1px solid rgba(79, 172, 254, 0.14);
-    background: rgba(13, 16, 23, 0.82);
+    background: rgba(17, 22, 34, 0.9) !important;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
 }
 .prism-card {
@@ -91,7 +119,7 @@ section[data-testid="stSidebar"] {
 }
 .void-sub {
     font-size: 1.08rem;
-    color: #8b949e;
+    color: #8b949e !important;
     margin-bottom: 20px;
 }
 .topbar-brand {
@@ -166,7 +194,6 @@ except Exception:
 
 # --- 4. SMART INTENT DETECTOR (NO PDF SPAM ON NORMAL CHAT) ---
 def detect_prism_intent(user_prompt, reply_text=""):
-    """Returns True ONLY when the user explicitly wants a PDF, study notes, slides/PPT, report, or web app."""
     p = user_prompt.lower()
     doc_triggers = [
         "pdf", "ppt", "powerpoint", "slide", "presentation", "study notes",
@@ -195,7 +222,6 @@ def escape_pdf_text(s):
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 def generate_real_pdf_bytes(title, markdown_content, author="VOID Forge"):
-    """Generates a genuine multi-page binary PDF-1.4 file with zero external dependencies."""
     clean_title = clean_for_pdf(title)
     raw_lines = clean_for_pdf(markdown_content).split("\n")
 
@@ -302,7 +328,6 @@ def generate_real_pdf_bytes(title, markdown_content, author="VOID Forge"):
     return bytes(pdf_bytes)
 
 def generate_interactive_slides_html(title, markdown_text):
-    """Compiles structured content into an interactive VOID Slide Deck."""
     sections = re.split(r"\n(?=## |\n# )", markdown_text.strip())
     if len(sections) <= 1:
         paragraphs = [p.strip() for p in markdown_text.split("\n\n") if p.strip()]
@@ -384,10 +409,10 @@ def generate_interactive_slides_html(title, markdown_text):
     </html>
     """
 
-# --- 6. LIVE WORLD TELEMETRY (REAL-TIME WEATHER, CLOCK & ENCYCLOPEDIA) ---
+# --- 6. LIVE WORLD TELEMETRY ---
 def fetch_live_weather(city_name="Varanasi"):
     try:
-        geo_url = f"[https://geocoding-api.open-meteo.com/v1/search?name=](https://geocoding-api.open-meteo.com/v1/search?name=){city_name}&count=1&language=en&format=json"
+        geo_url = safe_url(f"[https://geocoding-api.open-meteo.com/v1/search?name=](https://geocoding-api.open-meteo.com/v1/search?name=){city_name}&count=1&language=en&format=json")
         geo_res = requests.get(geo_url, timeout=5).json()
         if "results" in geo_res and geo_res["results"]:
             loc = geo_res["results"][0]
@@ -396,7 +421,7 @@ def fetch_live_weather(city_name="Varanasi"):
         else:
             lat, lon, resolved_name = 25.3176, 82.9739, "Varanasi, Uttar Pradesh, India"
 
-        w_url = (
+        w_url = safe_url(
             f"[https://api.open-meteo.com/v1/forecast?latitude=](https://api.open-meteo.com/v1/forecast?latitude=){lat}&longitude={lon}"
             f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
             f"&daily=temperature_2m_max,temperature_2m_min&timezone=auto"
@@ -427,7 +452,7 @@ def fetch_live_knowledge(query):
         clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", query).strip()
         if len(clean_q) < 3:
             return ""
-        search_url = f"[https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=](https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=){clean_q}&utf8=&format=json&srlimit=2"
+        search_url = safe_url(f"[https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=](https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=){clean_q}&utf8=&format=json&srlimit=2")
         headers = {"User-Agent": "VOIDCore/3.0"}
         s_res = requests.get(search_url, headers=headers, timeout=4).json()
         results = s_res.get("query", {}).get("search", [])
@@ -463,7 +488,7 @@ def send_otp_email(receiver_email, otp_code):
     if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
         return False, "EmailJS credentials missing in Streamlit Secrets."
     try:
-        url = "[https://api.emailjs.com/api/v1.0/email/send](https://api.emailjs.com/api/v1.0/email/send)"
+        url = safe_url("https" + "://" + "[api.emailjs.com/api/v1.0/email/send](https://api.emailjs.com/api/v1.0/email/send)")
         payload = {
             "service_id": EMAILJS_SERVICE_ID.strip(),
             "template_id": EMAILJS_TEMPLATE_ID.strip(),
@@ -501,7 +526,8 @@ def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.25, tok
     payload = [{"role": "system", "content": system_prompt}] + clean_msgs
     data = {"model": target_slug, "messages": payload, "temperature": temp, "max_tokens": tokens}
     try:
-        r = requests.post("[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)", headers=headers, json=data, timeout=60)
+        endpoint = safe_url("https" + "://" + "openrouter.ai/api/v1/chat/completions")
+        r = requests.post(endpoint, headers=headers, json=data, timeout=60)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"], None
         return None, f"Resonance Error ({r.status_code}): {r.text}"
@@ -626,7 +652,7 @@ if "current_chat_id" not in st.session_state or st.session_state.current_chat_id
 current_chat_id = st.session_state.current_chat_id
 current_chat = user_chats[current_chat_id]
 
-# --- 10. LEFT SIDEBAR (SESSIONS, PRISM TOGGLE, IDENTITY VAULT, FOUNDER PROFILE) ---
+# --- 10. LEFT SIDEBAR ---
 with st.sidebar:
     st.markdown(f'<div class="topbar-brand"><img src="{LOGO_B64}" width="32"/><span class="topbar-title">VOID</span><span class="topbar-pill">PRISM OS</span></div>', unsafe_allow_html=True)
 
@@ -725,7 +751,6 @@ with top_c4:
         temperature = st.slider("Creativity", 0.0, 1.0, 0.25, 0.05)
         max_tokens = st.slider("Max Output Capacity", 500, 4000, 2200, 100)
 
-# Master System Prompt with strict Founder vs. Guest separation & zero external brand names
 def build_master_system_prompt(user_query, is_prism_task=False, extra_instructions=""):
     live_sensors = build_live_sensor_context(user_query, default_city=user_city)
     formatting_rule = (
@@ -790,7 +815,6 @@ if ui_mode == "✦ VOID Core & Prism":
         for idx, msg in enumerate(current_chat["messages"]):
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
-                # ONLY show PDF & Prism buttons if this specific message was a document/notes/slides/app request!
                 if msg["role"] == "assistant" and msg.get("is_prism", False):
                     btn_c1, btn_c2 = st.columns([1, 1])
                     with btn_c1:
