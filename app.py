@@ -28,7 +28,7 @@ if not os.path.exists("void_logo.svg"):
 LOGO_PATH = next((p for p in ("logo.png", "void_logo.svg") if os.path.exists(p)), "⚡")
 
 st.set_page_config(page_title="VOID — Cosmic Architecture & Creation Engine",
-                   page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
+                    page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
 try:
     if LOGO_PATH != "⚡":
         st.logo(LOGO_PATH)
@@ -203,7 +203,7 @@ def fetch_live_knowledge(query):
         if len(q) < 3:
             return ""
         r = requests.get(WIKI_URL, params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": 2},
-                         headers={"User-Agent": "VOIDCore/3.1"}, timeout=4).json()
+                       headers={"User-Agent": "VOIDCore/3.1"}, timeout=4).json()
         snips = [re.sub(r"<.*?>", "", x.get("snippet", "")) for x in r.get("query", {}).get("search", [])]
         return f"[LIVE ARCHIVE DATA]: {' | '.join(snips)}" if snips else ""
     except Exception:
@@ -339,7 +339,7 @@ def generate_interactive_slides_html(title, markdown):
         heading = lines[0].lstrip("#").strip() or f"Slide {i + 1}"
         body = "<br>".join(_md_inline(l) for l in lines[1:] if l.strip())
         out.append(f'<div class="slide{" on" if i == 0 else ""}"><div class="badge">VOID PRISM DECK • SLIDE {i + 1} OF {len(secs)}</div>'
-                   f'<h2>{esc(heading.replace("**", ""))}</h2><div class="body">{body}</div></div>')
+                    f'<h2>{esc(heading.replace("**", ""))}</h2><div class="body">{body}</div></div>')
     return SLIDE_TPL.replace("%%TITLE%%", esc(title)).replace("%%SLIDES%%", "".join(out))
 
 def extract_code_blocks(text):
@@ -546,12 +546,12 @@ with st.sidebar:
 c1, c2, c3, c4 = st.columns([1.9, 1.8, 1.7, 1.2])
 with c1:
     ui_mode = st.selectbox("Dimension", ["✦ VOID Core & Prism", "📖 VOID Codex (Study, PDF & Slides)",
-                                         "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab"], label_visibility="collapsed")
+                                        "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab"], label_visibility="collapsed")
 with c2:
     cosmic_entity = st.selectbox("Cosmic Engine", list(ENGINES), label_visibility="collapsed")
 with c3:
     persona = st.selectbox("Resonance Mode", ["✦ VOID Omni (Universal)", "🎓 Master Scholastic Tutor",
-                                              "💻 Full-Stack Architect", "🎨 UI & Slide Designer", "🐞 Deep Bug Hunter"],
+                                            "💻 Full-Stack Architect", "🎨 UI & Slide Designer", "🐞 Deep Bug Hunter"],
                            label_visibility="collapsed")
 with c4:
     with st.popover("➕ Attach & Tune", use_container_width=True):
@@ -766,7 +766,7 @@ elif ui_mode == "⚡ Live Web App Studio":
     st.markdown("### ⚡ VOID Live Web App & Game Studio")
     st.caption("Describe a web app, calculator, dashboard, or mini-game and VOID builds it live.")
     ui_prompt = st.text_area("What should VOID build?", height=85,
-                             placeholder="E.g., A dark-mode Hand Cricket game or a Pomodoro study dashboard...")
+                            placeholder="E.g., A dark-mode Hand Cricket game or a Pomodoro study dashboard...")
     if st.button("🚀 Forge & Launch App", type="primary"):
         if ui_prompt.strip():
             sys_p = "Output ONLY one complete, self-contained HTML file (embedded <style> and <script>) inside a ```html code block."
@@ -814,4 +814,3 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
             st.markdown(st.session_state.lab_result)
         else:
             st.info("Paste code on the left and click Transform.")
-
