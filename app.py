@@ -35,7 +35,7 @@ try:
 except Exception:
     pass
 
-# --- MATERIAL SLATE OS THEME (Balanced Slate Gray, No Blinding White, No Harsh Pitch Black) ---
+# --- MATERIAL SLATE OS THEME ---
 st.markdown("""<style>
 .stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background-color:#11151c!important;color:#e2e8f0!important}
 [data-testid="stForm"]{background:linear-gradient(145deg,#181f2c,#11151c)!important;border:1px solid rgba(59,130,246,.25)!important;border-radius:18px!important;padding:24px!important;box-shadow:0 12px 35px rgba(0,0,0,.4)!important}
@@ -837,4 +837,9 @@ elif ui_mode == "🧬 Self-Evolution Lab":
             else:
                 st.error(err)
         else:
-      ------------------
+            st.warning("Enter an upgrade goal first.")
+
+    if "evo_result" in st.session_state:
+        st.markdown("---")
+        st.markdown("#### 🛠️ Generated Upgrade Blueprint")
+        st.markdown(st.session_state.evo_result)
