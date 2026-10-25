@@ -31,7 +31,8 @@ if not os.path.exists("void_logo.svg"):
 LOGO_PATH = next((p for p in ("logo.png", "void_logo.svg") if os.path.exists(p)), "⚡")
 
 st.set_page_config(page_title="VOID — Sovereign OS Intelligence",
-                    page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
+                   page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
+st.markdown('<meta name="google-site-verification" content="C87WLjCoChgG0vY5usR4W6PhOzigtgAKBvOrbWK-XUU" /> , unsafe_allow_html=True)
 try:
     if LOGO_PATH != "⚡":
         st.logo(LOGO_PATH)
