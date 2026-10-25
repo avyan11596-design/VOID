@@ -11,9 +11,12 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+
+APP_VERSION = "4.0.0-Supernova"
 
 # ============================== 1. BRAND & PAGE ==============================
 SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
@@ -96,12 +99,15 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
 .topbar-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .topbar-title { font-size: 1.45rem; font-weight: 800; letter-spacing: 2px; color: #fff; }
 .topbar-pill { font-size: .65rem; padding: 3px 10px; border-radius: 99px; background: rgba(59,130,246,0.25); color: #60a5fa; border: 1px solid rgba(59,130,246,.5); font-weight: 700; }
+.void-footer { text-align: center; color: #64748b !important; font-size: .78rem; padding: 26px 0 8px; letter-spacing: .4px; }
+.void-footer span { color: #64748b !important; }
 .stButton button { border-radius: 12px !important; border: 1px solid rgba(148,163,184,.3) !important; background: #1e293b !important; color: #f8fafc !important; transition: all .2s ease !important; font-weight: 600 !important; }
 .stButton button:hover { border-color: #3b82f6 !important; background: #2563eb !important; box-shadow: 0 0 14px rgba(59,130,246,.5) !important; }
 </style>""", unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 EMAILJS_URL = "https://api.emailjs.com/api/v1.0/email/send"
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
@@ -136,6 +142,13 @@ def esc(s):
 def safe_name(s, n=25):
     return re.sub(r"\W+", "_", s).strip("_")[:n] or "VOID"
 
+# --- Shared HTTP session (connection pooling) ---
+@st.cache_resource(show_spinner=False)
+def http_session():
+    s = requests.Session()
+    s.headers.update({"User-Agent": f"VOIDCore/{APP_VERSION}", "X-Title": "VOID"})
+    return s
+
 # ============================== 3. DATABASE ==============================
 def load_db():
     try:
@@ -143,9 +156,10 @@ def load_db():
             d = json.load(f)
         d.setdefault("users", {})
         d.setdefault("chats", {})
+        d.setdefault("usage", {})
         return d
     except Exception:
-        return {"users": {}, "chats": {}}
+        return {"users": {}, "chats": {}, "usage": {}}
 
 def save_db(d):
     try:
@@ -170,9 +184,11 @@ def ensure_user(email, name=None):
     if rec is None:
         nm = FOUNDER_NAME if founder else (name or email.split("@")[0].capitalize())
         rec = {"name": nm, "city": "Varanasi", "joined": now, "last_active": now, "prompts": 0,
-               "memory": FOUNDER_BIO if founder else f"Verified member of VOID Studio ({nm})."}
+               "memory": FOUNDER_BIO if founder else f"Verified member of VOID Studio ({nm}).",
+               "recent_topics": []}
         db["users"][email] = rec
     else:
+        rec.setdefault("recent_topics", [])
         rec["last_active"] = now
         if name and not founder:
             rec["name"] = name
@@ -180,6 +196,15 @@ def ensure_user(email, name=None):
         new_chat(email)
     save_db(db)
     return rec
+
+def bump_daily_usage():
+    today = datetime.now().strftime("%Y-%m-%d")
+    db.setdefault("usage", {})
+    db["usage"][today] = db["usage"].get(today, 0) + 1
+    # keep only the last 60 days of usage logs
+    if len(db["usage"]) > 60:
+        for k in sorted(db["usage"])[:-60]:
+            db["usage"].pop(k, None)
 
 # ============================== 4. BULLETPROOF SIGNED LOGIN ==============================
 def signing_key():
@@ -199,15 +224,19 @@ def sign(email, ts):
     return hmac.new(signing_key(), f"{email}|{ts}".encode(), hashlib.sha256).hexdigest()[:32]
 
 def remember_login(email):
+    """Persist login in the URL. Only touches query params when values actually
+    change, to avoid needless Streamlit rerun churn."""
     ts = str(int(time.time()))
-    st.query_params.update({"user": email, "ts": ts, "sig": sign(email, ts)})
+    qp = st.query_params
+    if qp.get("user") != email or not qp.get("ts") or not qp.get("sig"):
+        qp.update({"user": email, "ts": ts, "sig": sign(email, ts)})
 
 def restore_login():
     qp = st.query_params
     email, ts, sig = qp.get("user"), qp.get("ts"), qp.get("sig")
-    if email and ts and sig and ts.isdigit() and time.time() - int(ts) < LOGIN_DAYS * 86400:
-        if hmac.compare_digest(sig, sign(email, ts)):
-            return email
+    if email and ts and sig and str(ts).isdigit() and time.time() - int(ts) < LOGIN_DAYS * 86400:
+        if hmac.compare_digest(str(sig), sign(str(email), str(ts))):
+            return str(email)
     return None
 
 # ============================== 5. LIVE CONTEXT ==============================
@@ -218,7 +247,7 @@ WMO = {0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast", 45:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def geocode(city):
-    r = requests.get(GEO_URL, params={"name": city, "count": 1, "language": "en", "format": "json"}, timeout=5).json()
+    r = http_session().get(GEO_URL, params={"name": city, "count": 1, "language": "en", "format": "json"}, timeout=5).json()
     res = (r.get("results") or [None])[0]
     if not res:
         return None
@@ -229,7 +258,7 @@ def geocode(city):
 def fetch_live_weather(city):
     try:
         lat, lon, label = geocode(city) or (25.3176, 82.9739, "Varanasi, Uttar Pradesh, India")
-        d = requests.get(WEATHER_URL, params={
+        d = http_session().get(WEATHER_URL, params={
             "latitude": lat, "longitude": lon, "timezone": "auto",
             "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
             "daily": "temperature_2m_max,temperature_2m_min"}, timeout=5).json()
@@ -247,12 +276,26 @@ def fetch_live_knowledge(query):
         q = re.sub(r"[^a-zA-Z0-9\s]", "", query).strip()[:120]
         if len(q) < 3:
             return ""
-        r = requests.get(WIKI_URL, params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": 2},
-                       headers={"User-Agent": "VOIDCore/3.1"}, timeout=4).json()
+        r = http_session().get(WIKI_URL, params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": 2},
+                       headers={"User-Agent": "VOIDCore/4.0"}, timeout=4).json()
         snips = [re.sub(r"<.*?>", "", x.get("snippet", "")) for x in r.get("query", {}).get("search", [])]
         return f"[LIVE ARCHIVE DATA]: {' | '.join(snips)}" if snips else ""
     except Exception:
         return ""
+
+@st.cache_data(ttl=900, show_spinner=False)
+def engine_status():
+    """Lightweight health probe of the AI engine link (public models endpoint)."""
+    if not API_KEY:
+        return "offline", "add OPENROUTER_API_KEY to secrets"
+    try:
+        r = http_session().get(OPENROUTER_MODELS_URL, timeout=6)
+        if r.status_code == 200:
+            n = len(r.json().get("data", []))
+            return "online", f"link stable • {n} models reachable"
+        return "error", f"gateway HTTP {r.status_code}"
+    except Exception as e:
+        return "error", str(e)[:70]
 
 WEATHER_WORDS = ("weather", "temperature", "temp", "rain", "forecast", "climate", "outside", "cold", "hot", "humidity")
 KNOW_WORDS = ("who is", "what is", "tell me about", "history of", "explain", "news", "search")
@@ -322,13 +365,15 @@ def generate_real_pdf_bytes(title, markdown, author="VOID Forge"):
         y -= post
     pages.append("\n".join(cur))
 
-    ids = [5 + i * 2 for i in range(len(pages))]
+    total = len(pages)
+    ids = [5 + i * 2 for i in range(total)]
     objs = [b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-            f"2 0 obj\n<< /Type /Pages /Kids [{' '.join(f'{i} 0 R' for i in ids)}] /Count {len(pages)} >>\nendobj\n".encode(),
+            f"2 0 obj\n<< /Type /Pages /Kids [{' '.join(f'{i} 0 R' for i in ids)}] /Count {total} >>\nendobj\n".encode(),
             b"3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n",
             b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n"]
-    for pid, stream in zip(ids, pages):
-        sb = stream.encode("latin-1")
+    for i, (pid, stream) in enumerate(zip(ids, pages), start=1):
+        footer = f"VOID Prism • Page {i} of {total}"
+        sb = (stream + f"\nBT /F1 8 Tf 1 0 0 1 470 28 Tm ({pdf_escape(footer)}) Tj ET").encode("latin-1")
         objs.append((f"{pid} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
                      f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {pid + 1} 0 R >>\nendobj\n").encode())
         objs.append(f"{pid + 1} 0 obj\n<< /Length {len(sb)} >>\nstream\n".encode() + sb + b"\nendstream\nendobj\n")
@@ -350,6 +395,7 @@ body{margin:0;background:#11151c;color:#f0f6fc;font-family:'Segoe UI',system-ui,
 .slide{display:none;width:100%;max-width:820px;background:linear-gradient(145deg,#181f2c,#11151c);border:1px solid rgba(59,130,246,.4);border-radius:24px;padding:40px 48px;box-shadow:0 20px 50px rgba(0,0,0,.7);min-height:310px;box-sizing:border-box}
 .slide.on{display:block}
 .badge{font-size:11px;letter-spacing:2px;color:#3b82f6;font-weight:700;margin-bottom:14px}
+.count{position:fixed;top:14px;right:20px;font-size:12px;color:#64748b;font-weight:700;letter-spacing:1px}
 h2{margin-top:0;font-size:28px;background:linear-gradient(90deg,#3b82f6,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .body{font-size:16px;line-height:1.7;color:#cbd5e1}
 code{background:#1e293b;padding:1px 6px;border-radius:5px}
@@ -358,10 +404,13 @@ button{background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130
 button:hover{background:#3b82f6;color:#fff;box-shadow:0 0 15px rgba(59,130,246,.5)}
 @media print{.ctl{display:none}body{height:auto;background:#fff}.slide{display:block;page-break-after:always;margin-bottom:16px}}
 </style></head><body><div class="wrap">%%SLIDES%%</div>
+<div class="count">%%COUNT%%</div>
 <div class="ctl"><button onclick="go(-1)">◀ Previous</button><button onclick="window.print()">🖨️ Export to PDF</button><button onclick="go(1)">Next ▶</button></div>
-<script>let c=0;const s=document.querySelectorAll('.slide');
-function go(d){s[c].classList.remove('on');c=(c+d+s.length)%s.length;s[c].classList.add('on')}
-document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1)});</script></body></html>"""
+<script>let c=0;const s=document.querySelectorAll('.slide');const n=document.querySelector('.count');
+function paint(){n.textContent=`SLIDE ${c+1} / ${s.length}`}
+function go(d){s[c].classList.remove('on');c=(c+d+s.length)%s.length;s[c].classList.add('on');paint()}
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1)});
+paint();</script></body></html>"""
 
 def _md_inline(line):
     line = line.strip()
@@ -385,7 +434,8 @@ def generate_interactive_slides_html(title, markdown):
         body = "<br>".join(_md_inline(l) for l in lines[1:] if l.strip())
         out.append(f'<div class="slide{" on" if i == 0 else ""}"><div class="badge">VOID PRISM DECK • SLIDE {i + 1} OF {len(secs)}</div>'
                     f'<h2>{esc(heading.replace("**", ""))}</h2><div class="body">{body}</div></div>')
-    return SLIDE_TPL.replace("%%TITLE%%", esc(title)).replace("%%SLIDES%%", "".join(out))
+    return (SLIDE_TPL.replace("%%TITLE%%", esc(title)).replace("%%COUNT%%", f"SLIDE 1 / {len(secs)}")
+            .replace("%%SLIDES%%", "".join(out)))
 
 def extract_code_blocks(text):
     return re.findall(r"```(\w*)\n(.*?)```", text, re.DOTALL)
@@ -402,7 +452,7 @@ def send_otp_email(to, code):
     if EJS_PRIVATE:
         payload["accessToken"] = EJS_PRIVATE
     try:
-        r = requests.post(EMAILJS_URL, json=payload, timeout=30)
+        r = http_session().post(EMAILJS_URL, json=payload, timeout=30)
         return (True, None) if r.status_code == 200 else (False, r.text[:200])
     except requests.RequestException as e:
         return False, str(e)
@@ -416,15 +466,28 @@ def _post(choice, system, msgs, temp, tokens, stream=False):
     msgs = [{"role": m["role"], "content": m["content"]} for m in msgs[-MAX_HISTORY:]]
     body = {"model": ENGINES.get(choice, "qwen/qwen-2.5-coder-32b-instruct"), "temperature": temp,
             "max_tokens": tokens, "stream": stream, "messages": [{"role": "system", "content": system}] + msgs}
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json", "X-Title": "VOID"}
-    try:
-        r = requests.post(OPENROUTER_URL, headers=headers, json=body, timeout=90, stream=stream)
-    except requests.RequestException as e:
-        raise EngineError(f"Connection interrupted: {e}")
-    if r.status_code != 200:
-        raise EngineError(f"Engine error ({r.status_code}): {r.text[:300]}")
-    r.encoding = "utf-8"
-    return r
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    last_err = None
+    for attempt in range(2):  # one automatic retry on transient connection failures
+        try:
+            r = http_session().post(OPENROUTER_URL, headers=headers, json=body, timeout=90, stream=stream)
+            if r.status_code == 429 or r.status_code >= 500:
+                last_err = EngineError(f"Engine busy ({r.status_code}): {r.text[:200]}")
+                if attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                raise last_err
+            if r.status_code != 200:
+                raise EngineError(f"Engine error ({r.status_code}): {r.text[:300]}")
+            r.encoding = "utf-8"
+            return r
+        except requests.RequestException as e:
+            last_err = EngineError(f"Connection interrupted: {e}")
+            if attempt == 0:
+                time.sleep(1.5)
+                continue
+            raise last_err
+    raise last_err or EngineError("Unknown engine failure.")
 
 def call_void_engine(choice, system, msgs, temp=0.25, tokens=2000):
     try:
@@ -449,6 +512,17 @@ def stream_void_engine(choice, system, msgs, temp=0.25, tokens=2000):
         if delta:
             yield delta
 
+
+def clean_stream(gen):
+    """Buffer the raw token stream into larger, smoother chunks (calm typing mode)."""
+    buf = ""
+    for chunk in gen:
+        buf += chunk
+        if len(buf) >= 120:
+            yield buf
+            buf = ""
+    if buf:
+        yield buf
 # ============================== 8. AUTHENTICATION GATE & PERSISTENCE FIX ==============================
 if "user_email" not in st.session_state:
     restored = restore_login()
@@ -463,8 +537,8 @@ if "user_email" not in st.session_state:
     with mid:
         if "pending_email" not in st.session_state:
             with st.form("email_form"):
-                email_in = st.text_input("Email Address", placeholder="name@example.com").strip().lower()
-                name_in = st.text_input("Display Name", placeholder="Your name").strip()[:40]
+                email_in = st.text_input("Email Address", placeholder="name@example.com", max_chars=80).strip().lower()
+                name_in = st.text_input("Display Name", placeholder="Your name", max_chars=40).strip()
                 if st.form_submit_button("Send Verification Code", type="primary", use_container_width=True):
                     wait = OTP_COOLDOWN - (time.time() - st.session_state.get("last_otp_ts", 0))
                     if not EMAIL_RE.match(email_in):
@@ -544,6 +618,7 @@ with st.sidebar:
     if st.session_state.pop("force_prism", False):
         st.session_state.prism_open = True
     prism_open = st.toggle("⚡ Open VOID Prism Panel", key="prism_open")
+    auto_scroll = st.toggle("🔄 Auto-Refresh Feed", value=False, help="Live-telemetry style: the app re-syncs every 10 seconds while you watch the console.")
 
     st.markdown("##### Active Sessions")
     for cid, cdata in reversed(list(user_chats.items())):
@@ -561,9 +636,16 @@ with st.sidebar:
                 st.rerun()
 
     st.markdown("---")
+    st.markdown("##### 📊 Chat Insights")
+    n_msgs = len(current_chat.get("messages", []))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Messages", n_msgs)
+    m2.metric("Sessions", len(user_chats))
+    m3.metric("Prompts", user_record.get("prompts", 0))
+
     with st.expander("🧬 Core Identity Vault"):
-        n_name = st.text_input("Display Name", value=user_name)
-        n_city = st.text_input("Default City (Live Weather)", value=user_city)
+        n_name = st.text_input("Display Name", value=user_name, max_chars=40)
+        n_city = st.text_input("Default City (Live Weather)", value=user_city, max_chars=60)
         n_mem = st.text_area("Personal Notes", value=user_memory, height=100)
         if st.button("💾 Save Identity", use_container_width=True):
             if not is_founder:
@@ -584,18 +666,24 @@ with st.sidebar:
                             unsafe_allow_html=True)
 
     st.caption(f"Operator: **{user_name}** (`{user_email}`)")
-    if st.button("Sign Out", use_container_width=True):
-        st.query_params.clear()
-        for k in ("user_email", "current_chat_id", "active_prism_text", "prism_open"):
-            st.session_state.pop(k, None)
-        st.rerun()
+    with st.expander("⏻ Account"):
+        confirm_out = st.checkbox("Confirm sign out")
+        if st.button("Sign Out", disabled=not confirm_out, use_container_width=True):
+            st.query_params.clear()
+            for k in ("user_email", "current_chat_id", "active_prism_text", "prism_open"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+if auto_scroll:
+    time.sleep(0.35)
+    st.rerun()
 
 # ============================== 11. COMMAND BAR ==============================
 c1, c2, c3, c4 = st.columns([1.9, 1.8, 1.7, 1.2])
 with c1:
     ui_mode = st.selectbox("Dimension", ["✦ VOID Core & Prism", "📖 VOID Codex (Study, PDF & Slides)",
                                         "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab",
-                                        "🧬 Self-Evolution Lab"], label_visibility="collapsed")
+                                        "🧬 Self-Evolution Lab", "🛰️ Ship Telemetry & Insights"], label_visibility="collapsed")
 with c2:
     cosmic_entity = st.selectbox("Cosmic Engine", list(ENGINES), label_visibility="collapsed")
 with c3:
@@ -613,8 +701,19 @@ with c4:
             except UnicodeDecodeError:
                 st.error("Unable to read this file as text.")
         task_depth = st.select_slider("Depth", ["Swift", "Balanced", "Maximum Power"], value="Maximum Power")
+        show_thinking = st.toggle("⌨️ Show Live Typing Telemetry", value=True,
+                                  help="Echo the model's raw tokens as they stream in. Turn off for a clean console.")
         temperature = st.slider("Creativity", 0.0, 1.0, 0.25, 0.05)
         max_tokens = st.slider("Max Output Length", 500, 4000, 3200, 100)
+
+with st.container():
+    hc_col, spacer, engine_col, persona_col, date_col = st.columns([1.1, 0.4, 1.4, 1.4, 1.6])
+    s_status, s_note = engine_status()
+    hc_col.metric("VOID Engine", "🟢 Online" if s_status == "online" else ("🔴 " + s_status.upper()), s_note)
+    engine_col.metric("Cosmic Engine", cosmic_entity.split(" ", 1)[1].split(" (")[0], "primary link")
+    persona_col.metric("Resonance", persona.split(" ", 1)[1] if " " in persona else persona, "style profile")
+    date_col.metric("Chronometer", datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y"),
+                    datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%I:%M %p IST"))
 
 def build_system_prompt(query, is_prism=False, extra=""):
     fmt = ("The user wants a formal document, study guide, PDF, slides, or web app. Use clean Markdown headings (# and ##) "
@@ -642,6 +741,17 @@ Mode: {persona} | Depth: {task_depth}
 {fmt}
 {extra}"""
 
+def send_to_prism(text, title):
+    st.session_state.active_prism_text = text
+    st.session_state.active_prism_title = title
+    st.session_state.force_prism = True
+
+def bump_usage():
+    user_record["prompts"] = user_record.get("prompts", 0) + 1
+    user_record["last_active"] = datetime.now().strftime("%b %d, %H:%M")
+    bump_daily_usage()
+    save_db(db)
+
 # ============================== DIMENSION 1: CORE & PRISM ==============================
 if ui_mode == "✦ VOID Core & Prism":
     if prism_open:
@@ -665,9 +775,9 @@ if ui_mode == "✦ VOID Core & Prism":
                         quick_prompt = prompt
 
         for idx, msg in enumerate(current_chat["messages"]):
-            with st.chat_message(msg["role"]):
+            with st.chat_message(msg["role"], avatar=LOGO_B64 if msg["role"] == "assistant" else None):
                 st.markdown(msg["content"])
-                if msg["role"] == "assistant" and msg.get("is_prism"):
+                if msg["role"] == "assistant":
                     b1, b2 = st.columns(2)
                     with b1:
                         st.download_button("📄 Download PDF", generate_real_pdf_bytes(current_chat["title"], msg["content"], f"VOID Forge ({user_name})"),
@@ -675,9 +785,12 @@ if ui_mode == "✦ VOID Core & Prism":
                                            mime="application/pdf", key=f"pdf_{idx}", use_container_width=True)
                     with b2:
                         if st.button("⚡ Open in Prism", key=f"op_{idx}", use_container_width=True):
-                            st.session_state.active_prism_text = msg["content"]
-                            st.session_state.active_prism_title = current_chat["title"]
-                            st.session_state.force_prism = True
+                            send_to_prism(msg["content"], current_chat["title"])
+                            st.rerun()
+                    if not msg.get("is_prism") and any(is_html_block(b) for b in extract_code_blocks(msg["content"])):
+                        if st.button("🖥️ Launch Live HTML", key=f"lv_{idx}"):
+                            blk = next(b for b in extract_code_blocks(msg["content"]) if is_html_block(b))
+                            send_to_prism(blk[1].strip(), current_chat["title"])
                             st.rerun()
 
     typed = st.chat_input(f"Command VOID, {user_name} — chat naturally, or ask for a PDF, slides, weather, or web app...")
@@ -689,18 +802,20 @@ if ui_mode == "✦ VOID Core & Prism":
             t = active_prompt.strip().replace("\n", " ")
             current_chat["title"] = t[:26] + "..." if len(t) > 26 else t
         current_chat["messages"].append({"role": "user", "content": full_prompt})
-        user_record["prompts"] = user_record.get("prompts", 0) + 1
-        user_record["last_active"] = datetime.now().strftime("%b %d, %H:%M")
-        save_db(db)
+        bump_usage()
 
         with chat_col:
             with st.chat_message("user"):
                 st.markdown(full_prompt)
-            with st.chat_message("assistant"):
+            with st.chat_message("assistant", avatar=LOGO_B64):
                 reply = None
                 try:
                     system = build_system_prompt(active_prompt, detect_prism_intent(active_prompt))
-                    reply = st.write_stream(stream_void_engine(cosmic_entity, system, current_chat["messages"], temperature, max_tokens))
+                    gen = stream_void_engine(cosmic_entity, system, current_chat["messages"], temperature, max_tokens)
+                    if show_thinking:
+                        reply = st.write_stream(gen)
+                    else:
+                        reply = st.write_stream(clean_stream(gen))
                     if not reply:
                         st.error("The engine returned an empty response. Please try again.")
                 except EngineError as e:
@@ -710,9 +825,7 @@ if ui_mode == "✦ VOID Core & Prism":
             is_prism = detect_prism_intent(active_prompt, reply)
             current_chat["messages"].append({"role": "assistant", "content": reply, "is_prism": is_prism})
             if is_prism:
-                st.session_state.active_prism_text = reply
-                st.session_state.active_prism_title = current_chat["title"]
-                st.session_state.force_prism = True
+                send_to_prism(reply, current_chat["title"])
             save_db(db)
             st.rerun()
         else:
@@ -732,14 +845,17 @@ if ui_mode == "✦ VOID Core & Prism":
                 blocks = extract_code_blocks(p_text)
                 t_doc, t_slides, t_app, t_edit = st.tabs(["📄 Document", "📊 Slides", "🖥️ Live App / Code", "✏️ Edit"])
                 with t_doc:
-                    d1, d2 = st.columns(2)
+                    d1, d2, d3 = st.columns(3)
                     with d1:
-                        st.download_button("📥 Download PDF", generate_real_pdf_bytes(p_title, p_text, f"VOID Forge ({user_name})"),
+                        st.download_button("📥 PDF", generate_real_pdf_bytes(p_title, p_text, f"VOID Forge ({user_name})"),
                                            file_name=f"VOID_{safe_name(p_title, 15)}.pdf", mime="application/pdf",
                                            type="primary", use_container_width=True)
                     with d2:
-                        st.download_button("📊 Download Slides", generate_interactive_slides_html(p_title, p_text).encode("utf-8"),
+                        st.download_button("📊 Slides", generate_interactive_slides_html(p_title, p_text).encode("utf-8"),
                                            file_name=f"VOID_Slides_{safe_name(p_title, 15)}.html", mime="text/html", use_container_width=True)
+                    with d3:
+                        st.download_button("📝 Markdown", p_text, file_name=f"VOID_{safe_name(p_title, 15)}.md",
+                                           mime="text/markdown", use_container_width=True)
                     st.markdown("---")
                     st.markdown(p_text)
                 with t_slides:
@@ -782,10 +898,12 @@ elif ui_mode == "📖 VOID Codex (Study, PDF & Slides)":
                 f"Create a master-level academic guide for {user_name} ({level}) on '{topic}'. Format: {fmt}. "
                 "Use clean # and ## headers so each section forms a page/slide. Include: 1. Core Concept Explanation, "
                 "2. Key Definitions & Formulas, 3. Worked Examples, 4. High-Probability Exam Questions with Answers."))
-            with st.spinner(f"Forging '{topic}'..."):
+            bump_usage()
+            with st.spinner(f"Forge '{topic}' in progress..."):
                 res, err = call_void_engine(cosmic_entity, sys_p, [{"role": "user", "content": f"Forge {fmt} for: {topic}"}], 0.2, 2600)
             if res:
                 st.session_state.codex_output, st.session_state.codex_topic = res, topic.strip()
+                st.rerun()
             else:
                 st.error(err)
         else:
@@ -795,7 +913,7 @@ elif ui_mode == "📖 VOID Codex (Study, PDF & Slides)":
         text, ctopic = st.session_state.codex_output, st.session_state.get("codex_topic", "Study")
         fname = safe_name(ctopic)
         st.markdown("---")
-        d1, d2, d3 = st.columns(3)
+        d1, d2, d3, d4 = st.columns(4)
         with d1:
             st.download_button("📄 PDF", generate_real_pdf_bytes(f"VOID Codex: {ctopic}", text, f"VOID Codex ({user_name})"),
                                file_name=f"VOID_Codex_{fname}.pdf", mime="application/pdf", type="primary", use_container_width=True)
@@ -804,6 +922,14 @@ elif ui_mode == "📖 VOID Codex (Study, PDF & Slides)":
                                file_name=f"VOID_Slides_{fname}.html", mime="text/html", use_container_width=True)
         with d3:
             st.download_button("📝 Markdown (.md)", text, file_name=f"VOID_Codex_{fname}.md", mime="text/markdown", use_container_width=True)
+        with d4:
+            if st.button("🧵 Save to Session", use_container_width=True):
+                cid = current_chat_id
+                user_chats[cid]["messages"].append({"role": "user", "content": f"[Codex] Forge {fmt} for: {ctopic} ({level})"})
+                user_chats[cid]["messages"].append({"role": "assistant", "content": text, "is_prism": True})
+                send_to_prism(text, f"VOID Codex: {ctopic}")
+                save_db(db)
+                st.success("Saved to current session.")
         tab1, tab2 = st.tabs(["📖 Notes", "📊 Slide Deck"])
         with tab1:
             st.markdown(text)
@@ -819,6 +945,7 @@ elif ui_mode == "⚡ Live Web App Studio":
     if st.button("🚀 Forge & Launch App", type="primary"):
         if ui_prompt.strip():
             sys_p = "Output ONLY one complete, self-contained HTML file (embedded <style> and <script>) inside a ```html code block."
+            bump_usage()
             with st.spinner("Forging interactive app..."):
                 res, err = call_void_engine(cosmic_entity, sys_p, [{"role": "user", "content": ui_prompt}], 0.3, max_tokens)
             if res:
@@ -838,6 +965,9 @@ elif ui_mode == "⚡ Live Web App Studio":
             st.markdown("##### 📄 Source")
             st.download_button("📥 Download index.html", st.session_state.studio_html, file_name="index.html",
                                mime="text/html", use_container_width=True)
+            if st.button("⚡ Send to Prism Panel", use_container_width=True):
+                send_to_prism(st.session_state.studio_html, "Web App Studio Build")
+                st.rerun()
             st.code(st.session_state.studio_html, language="html")
 
 # ============================== DIMENSION 4: CODE LAB ==============================
@@ -854,12 +984,19 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
         if run:
             if raw.strip():
                 sys_p = f"Perform this exact operation on the user's code: {action}. Briefly highlight the key changes, then give the complete upgraded code."
+                bump_usage()
                 with st.spinner("Refactoring..."):
                     res, err = call_void_engine(cosmic_entity, sys_p, [{"role": "user", "content": raw}], 0.1, max_tokens)
                 st.session_state.lab_result = res if res else f"⚠️ {err}"
+                st.session_state.lab_action = action
             else:
                 st.warning("Paste some code first.")
         if st.session_state.get("lab_result"):
+            lr1, lr2 = st.columns([3, 1.1])
+            with lr2:
+                if st.button("⚡ Send to Prism", use_container_width=True):
+                    send_to_prism(st.session_state.lab_result, f"Code Lab — {st.session_state.get('lab_action', 'Output')}")
+                    st.rerun()
             st.markdown(st.session_state.lab_result)
         else:
             st.info("Paste code on the left and click Transform.")
@@ -868,7 +1005,16 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
 elif ui_mode == "🧬 Self-Evolution Lab":
     st.markdown("### 🧬 VOID Self-Evolution & Meta-Coding Lab")
     st.caption("Use VOID's maximum coding power to inspect, upgrade, or add new features directly to VOID itself.")
-    
+    with st.expander("📎 Attach current app.py (recommended for precision upgrades)"):
+        evo_file = st.file_uploader("Upload app.py", type=["py", "txt"], key="evo_uploader")
+        evo_src = ""
+        if evo_file:
+            try:
+                evo_src = evo_file.getvalue().decode("utf-8")[:MAX_FILE_CHARS]
+                st.success(f"Loaded `{evo_file.name}` ({len(evo_src)} chars) — upgrades will be generated against YOUR code.")
+            except UnicodeDecodeError:
+                st.error("Unable to read this file as text.")
+
     evo_goal = st.text_area("What upgrade or new feature should VOID build for itself?", height=100,
                             placeholder="E.g., Add a Pomodoro timer sidebar widget, or add speech-to-text input...")
     if st.button("⚡ Execute Self-Upgrade", type="primary"):
@@ -877,6 +1023,9 @@ elif ui_mode == "🧬 Self-Evolution Lab":
                 f"You are the master core architect of VOID. The founder ({FOUNDER_NAME}) wants to upgrade VOID with the following feature: '{evo_goal}'. "
                 "Provide complete, clean Python code modifications or additions (using Streamlit) so Avyan can easily copy and paste them into app.py."
             )
+            if evo_src:
+                evo_sys += "\n\n=== CURRENT APP SOURCE (upgrade THIS code, output full modified sections) ===\n" + evo_src
+            bump_usage()
             with st.spinner("Analyzing app architecture and generating upgrade..."):
                 res, err = call_void_engine("☀️ Supernova X (Master Coding Architect)", evo_sys, [{"role": "user", "content": evo_goal}], 0.2, 3500)
             if res:
@@ -890,3 +1039,71 @@ elif ui_mode == "🧬 Self-Evolution Lab":
         st.markdown("---")
         st.markdown("#### 🛠️ Generated Upgrade Blueprint")
         st.markdown(st.session_state.evo_result)
+        blocks = extract_code_blocks(st.session_state.evo_result)
+        if blocks:
+            with st.expander("🐍 Preview & copy code"):
+                for bi, b in enumerate(blocks):
+                    st.code(b[1].strip(), language=(b[0] or "python").lower())
+
+# ============================== DIMENSION 6: SHIP TELEMETRY & INSIGHTS ==============================
+elif ui_mode == "🛰️ Ship Telemetry & Insights":
+    st.markdown("### 🛰️ VOID Ship Telemetry")
+    st.caption("Command-deck overview of the whole VOID installation: crew, sessions, and daily engine load.")
+
+    total_chats = sum(len(v) for v in db["chats"].values())
+    total_msgs = sum(len(c.get("messages", [])) for v in db["chats"].values() for c in v.values())
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("👥 Crew Members", len(db["users"]))
+    k2.metric("💬 Total Sessions", total_chats)
+    k3.metric("✉️ Total Messages", total_msgs)
+    k4.metric("🔥 Prompts (all time)", sum(db.get("usage", {}).values()))
+
+    st.markdown("##### 🔥 Daily Engine Load (last 30 days)")
+    today = datetime.now().date()
+    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
+    series = pd.Series([db.get("usage", {}).get(d, 0) for d in days], index=[d[5:] for d in days])
+    if series.sum() > 0:
+        st.area_chart(series, height=260)
+    else:
+        st.info("No engine activity recorded in the last 30 days yet — send a command in VOID Core and return here.")
+
+    if is_founder:
+        st.markdown("##### 👥 Crew Roster")
+        rows = [{"Member": info.get("name", "Member"), "Email": mail, "Prompts": info.get("prompts", 0),
+                 "Last Active": info.get("last_active", ""), "Joined": info.get("joined", "")}
+                for mail, info in db["users"].items()]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No crew members registered yet.")
+
+        st.markdown("##### 🧭 Sovereign Controls (Founder only)")
+        exp_c1, exp_c2 = st.columns(2)
+        with exp_c1:
+            if st.button("📤 Export Full Database (.json)", use_container_width=True):
+                st.download_button("📥 Download void_hub_db.json", json.dumps(db, indent=2),
+                                   file_name="void_hub_db_export.json", mime="application/json", use_container_width=True)
+        with exp_c2:
+            with st.popover("☢️ Danger Zone"):
+                st.warning("This wipes ALL users, sessions and messages. Cannot be undone.")
+                if st.checkbox("I understand, wipe everything"):
+                    if st.button("💥 Factory Reset VOID", type="primary"):
+                        db.clear()
+                        db.update({"users": {}, "chats": {}, "usage": {}})
+                        save_db(db)
+                        st.success("VOID has been reset. Reloading...")
+                        time.sleep(1)
+                        st.rerun()
+    else:
+        st.info("Founder-level telemetry (crew roster, database export, factory reset) is restricted to the Founder account.")
+
+    st.markdown("##### 🧩 System Status")
+    stc1, stc2, stc3, stc4 = st.columns(4)
+    stc1.metric("Engine Link", "🟢 Stable" if s_status == "online" else "🔴 Check secrets")
+    stc2.metric("Mail Relay", "🟢 Configured" if (EJS_SERVICE and EJS_TEMPLATE and EJS_PUBLIC) else "🟠 Not configured")
+    stc3.metric("App Version", "v" + APP_VERSION.replace("-Supernova", " Supernova"))
+    stc4.metric("Data Store", "🟢 " + DB_FILE)
+
+# ============================== 12. FOOTER ==============================
+st.markdown('<div class="void-footer">⚡ VOID — Sovereign OS Intelligence • Forged by ' + esc(FOUNDER_NAME) +
+            ' • Prism OS v' + APP_VERSION + '</div>', unsafe_allow_html=True)
