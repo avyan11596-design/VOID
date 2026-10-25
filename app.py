@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "4.0.3-Supernova"
+APP_VERSION = "4.0.6-Supernova"
 
 # ============================== 1. BRAND & PAGE ==============================
 SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
@@ -647,7 +647,7 @@ with st.sidebar:
         if st.button("💾 Save Identity", use_container_width=True):
             if not is_founder:
                 user_record["name"] = n_name.strip()[:40] or user_name
-            user_record["city"] = n_city.strip()[:60]
+            user_record["city"] = n_city.strip() or "Varanasi"
             user_record["memory"] = n_mem.strip()
             save_db(db)
             st.rerun()
@@ -720,17 +720,14 @@ def build_system_prompt(query, is_prism=False, extra=""):
     return f"""You are VOID, an elite sovereign coding intelligence and digital workspace created by {FOUNDER_NAME}.
 Never mention any outside company or model names; you are strictly VOID, powered by the Cosmic Engines (Supernova X, Nebula Core, Void Moon).
 
-=== CURRENT OPERATOR (CRITICAL IDENTITY) ===
-- Operator Name: {user_name}
-- Operator Email: {user_email}
-- Operator City: {user_city}
-- Operator Bio / Memory: {user_memory}
-RULE: If the operator or anyone asks "Who am I?", "What is my name?", or queries their identity, immediately state that they are **{user_name}** (`{user_email}`) and detail their background from the Operator Bio above!
+=== CURRENT OPERATOR ===
+Name: {user_name} | Email: {user_email} | City: {user_city}
+Operator notes: {user_memory}
+If asked "Who am I?", answer that they are {user_name} (signed in as {user_email}) and share the notes above.
 
-=== FOUNDER & CREATOR ===
-- Founder Name: {FOUNDER_NAME}
-- Founder Bio: {FOUNDER_BIO}
-RULE: If anyone asks "Who is Avyan?", "Who created you?", "Who is the founder of VOID?", or "Who made this app?", proudly explain that **Avyan** is the 14-year-old Founder & Lead Architect of VOID, studying in Class 8 at Sunbeam School Varuna in Varanasi, creator of VoidOS, author of 'World Zero', and gamer (NOTREFLEXGAMING05).
+=== FOUNDER ===
+{FOUNDER_NAME}: {FOUNDER_BIO}
+If asked who created VOID or who the founder is, present this proudly.
 
 === LIVE TELEMETRY ===
 {build_live_context(query, user_city)}
@@ -1059,7 +1056,7 @@ elif ui_mode == "🛰️ Ship Telemetry & Insights":
 
     st.markdown("##### 🔥 Daily Engine Load (last 30 days)")
     today = datetime.now().date()
-    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d"] for i in range(29, -1, -1)]
+    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
     series = pd.Series([db.get("usage", {}).get(d, 0) for d in days], index=[d[5:] for d in days])
     if series.sum() > 0:
         st.area_chart(series, height=260)
