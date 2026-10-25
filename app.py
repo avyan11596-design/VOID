@@ -36,24 +36,23 @@ try:
 except Exception:
     pass
 
-# Safe URL helper that automatically fixes missing colons ('https//' -> 'https://')
-def safe_url(u):
-    u = u.strip()
-    if u.startswith("https//"):
-        u = "https://" + u[len("https//"):]
-    elif u.startswith("http//"):
-        u = "http://" + u[len("http//"):]
-    return u
+# Bulletproof URL sanitizer: strips any accidental markdown brackets [ ] or missing colons
+def clean_endpoint(raw_str):
+    s = raw_str.strip()
+    if "](" in s and s.endswith(")"):
+        s = s.split("](")[-1][:-1]
+    s = s.replace("[", "").replace("]", "")
+    if s.startswith("https//"):
+        s = "https://" + s[7:]
+    elif s.startswith("http//"):
+        s = "http://" + s[6:]
+    if not s.startswith("http"):
+        s = "https://" + s.lstrip(":/")
+    return s
 
-# --- 2. FORCED PERMANENT DARK MODE & PURE VOID CSS ---
-st.markdown("""
-<head>
-    <meta name="description" content="VOID is a next-generation digital workspace, scholastic codex, PDF/Slide forge, and live web studio architected by Avyan.">
-    <meta name="keywords" content="VOID, Avyan, VoidOS, VOID Studio, VOID Codex, Web Studio">
-    <meta name="author" content="Avyan">
-</head>
+# --- 2. PURE SINGLE-BLOCK CSS (NO <HEAD> TAGS SO CSS NEVER LEAKS ON SCREEN) ---
+VOID_CSS = """
 <style>
-/* Force Deep Cosmic Dark Mode on all devices */
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     background-color: #0b0e14 !important;
     color: #f0f6fc !important;
@@ -64,14 +63,6 @@ st.markdown("""
     border-radius: 16px !important;
     padding: 22px !important;
 }
-label, p, span, div {
-    color: #e6edf3;
-}
-input, textarea {
-    background-color: #161b26 !important;
-    color: #ffffff !important;
-}
-
 div[data-testid="stToolbarActions"] { display: none !important; }
 div[data-testid="stAppDeployButton"] { display: none !important; }
 div[data-testid="stDecoration"] { display: none !important; }
@@ -79,7 +70,6 @@ div[data-testid="stStatusWidget"] { display: none !important; }
 #MainMenu { visibility: hidden !important; }
 footer { visibility: hidden !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
-
 .block-container {
     padding-top: 1rem !important;
     padding-bottom: 2.5rem !important;
@@ -153,7 +143,8 @@ section[data-testid="stSidebar"] {
     box-shadow: 0 0 12px rgba(79, 172, 254, 0.25) !important;
 }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(VOID_CSS, unsafe_allow_html=True)
 
 # --- 3. PERSISTENT DATABASE & SECRETS ---
 DB_FILE = "void_hub_db.json"
@@ -409,10 +400,11 @@ def generate_interactive_slides_html(title, markdown_text):
     </html>
     """
 
-# --- 6. LIVE WORLD TELEMETRY ---
+# --- 6. LIVE WORLD TELEMETRY (CONSTRUCTED URLS SO CLIPBOARD NEVER BREAKS THEM) ---
 def fetch_live_weather(city_name="Varanasi"):
     try:
-        geo_url = safe_url(f"[https://geocoding-api.open-meteo.com/v1/search?name=](https://geocoding-api.open-meteo.com/v1/search?name=){city_name}&count=1&language=en&format=json")
+        geo_host = "geocoding-api." + "open-meteo." + "com"
+        geo_url = clean_endpoint(f"https://{geo_host}/v1/search?name={city_name}&count=1&language=en&format=json")
         geo_res = requests.get(geo_url, timeout=5).json()
         if "results" in geo_res and geo_res["results"]:
             loc = geo_res["results"][0]
@@ -421,8 +413,9 @@ def fetch_live_weather(city_name="Varanasi"):
         else:
             lat, lon, resolved_name = 25.3176, 82.9739, "Varanasi, Uttar Pradesh, India"
 
-        w_url = safe_url(
-            f"[https://api.open-meteo.com/v1/forecast?latitude=](https://api.open-meteo.com/v1/forecast?latitude=){lat}&longitude={lon}"
+        w_host = "api." + "open-meteo." + "com"
+        w_url = clean_endpoint(
+            f"https://{w_host}/v1/forecast?latitude={lat}&longitude={lon}"
             f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
             f"&daily=temperature_2m_max,temperature_2m_min&timezone=auto"
         )
@@ -452,7 +445,8 @@ def fetch_live_knowledge(query):
         clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", query).strip()
         if len(clean_q) < 3:
             return ""
-        search_url = safe_url(f"[https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=](https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=){clean_q}&utf8=&format=json&srlimit=2")
+        wiki_host = "en." + "wikipedia." + "org"
+        search_url = clean_endpoint(f"https://{wiki_host}/w/api.php?action=query&list=search&srsearch={clean_q}&utf8=&format=json&srlimit=2")
         headers = {"User-Agent": "VOIDCore/3.0"}
         s_res = requests.get(search_url, headers=headers, timeout=4).json()
         results = s_res.get("query", {}).get("search", [])
@@ -483,12 +477,13 @@ def build_live_sensor_context(user_prompt, default_city="Varanasi"):
 
     return "\n".join(sensor_lines)
 
-# --- 7. EMAILJS OTP GATEWAY & COSMIC ENGINES ---
+# --- 7. EMAILJS OTP GATEWAY & COSMIC ENGINES (SPLIT STRINGS SO NO MARKDOWN BRACKETS) ---
 def send_otp_email(receiver_email, otp_code):
     if not EMAILJS_SERVICE_ID or not EMAILJS_TEMPLATE_ID or not EMAILJS_PUBLIC_KEY:
         return False, "EmailJS credentials missing in Streamlit Secrets."
     try:
-        url = safe_url("https" + "://" + "[api.emailjs.com/api/v1.0/email/send](https://api.emailjs.com/api/v1.0/email/send)")
+        ejs_host = "api." + "emailjs." + "com"
+        url = clean_endpoint(f"https://{ejs_host}/api/v1.0/email/send")
         payload = {
             "service_id": EMAILJS_SERVICE_ID.strip(),
             "template_id": EMAILJS_TEMPLATE_ID.strip(),
@@ -516,17 +511,19 @@ def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.25, tok
     if not API_KEY:
         return None, "⚠️ Master Key missing in Streamlit Secrets (`OPENROUTER_API_KEY`)."
     target_slug = COSMIC_OBJECTS.get(cosmic_choice, "google/gemini-2.5-flash")
+    ref_host = "void-ai-hub." + "streamlit." + "app"
     headers = {
         "Authorization": f"Bearer {API_KEY.strip()}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "[https://void-ai-hub.streamlit.app](https://void-ai-hub.streamlit.app)",
+        "HTTP-Referer": f"https://{ref_host}",
         "X-Title": "VOID"
     }
     clean_msgs = [{"role": m["role"], "content": m["content"]} for m in messages_list]
     payload = [{"role": "system", "content": system_prompt}] + clean_msgs
     data = {"model": target_slug, "messages": payload, "temperature": temp, "max_tokens": tokens}
     try:
-        endpoint = safe_url("https" + "://" + "openrouter.ai/api/v1/chat/completions")
+        or_host = "openrouter." + "ai"
+        endpoint = clean_endpoint(f"https://{or_host}/api/v1/chat/completions")
         r = requests.post(endpoint, headers=headers, json=data, timeout=60)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"], None
