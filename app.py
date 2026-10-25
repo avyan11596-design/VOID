@@ -16,7 +16,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # ============================== 1. BRAND & PAGE ==============================
-SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4facfe"/><stop offset="100%" stop-color="#9b51e0"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#0b0e14" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
+SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
 LOGO_B64 = "data:image/svg+xml;base64," + base64.b64encode(SVG_RAW.encode()).decode()
 
 if not os.path.exists("void_logo.svg"):
@@ -27,7 +27,7 @@ if not os.path.exists("void_logo.svg"):
         pass
 LOGO_PATH = next((p for p in ("logo.png", "void_logo.svg") if os.path.exists(p)), "⚡")
 
-st.set_page_config(page_title="VOID — Cosmic Architecture & Creation Engine",
+st.set_page_config(page_title="VOID — Sovereign OS Intelligence",
                     page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
 try:
     if LOGO_PATH != "⚡":
@@ -35,24 +35,25 @@ try:
 except Exception:
     pass
 
+# --- MATERIAL SLATE OS THEME (Balanced Slate Gray, No Blinding White, No Harsh Pitch Black) ---
 st.markdown("""<style>
-.stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background-color:#0b0e14!important;color:#f0f6fc!important}
-[data-testid="stForm"]{background:#111622!important;border:1px solid rgba(79,172,254,.25)!important;border-radius:16px!important;padding:22px!important}
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background-color:#11151c!important;color:#e2e8f0!important}
+[data-testid="stForm"]{background:linear-gradient(145deg,#181f2c,#11151c)!important;border:1px solid rgba(59,130,246,.25)!important;border-radius:18px!important;padding:24px!important;box-shadow:0 12px 35px rgba(0,0,0,.4)!important}
 [data-testid="stToolbarActions"],[data-testid="stAppDeployButton"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important}
 #MainMenu,footer{visibility:hidden!important}
 header[data-testid="stHeader"]{background:transparent!important}
-.block-container{padding-top:1rem!important;padding-bottom:2.5rem!important;max-width:1380px}
-section[data-testid="stSidebar"]{background:#07090e!important;border-right:1px solid rgba(79,172,254,.14)}
-.stChatMessage{border-radius:16px;padding:16px 20px;margin-bottom:12px;border:1px solid rgba(79,172,254,.14);background:rgba(17,22,34,.9)!important;box-shadow:0 4px 20px rgba(0,0,0,.28)}
-.prism-card{background:#0b0f17;border:1px solid rgba(79,172,254,.3);border-radius:16px;padding:18px;box-shadow:0 8px 32px rgba(0,0,0,.45)}
-.void-hero{text-align:center;padding:24px 10px 18px}
-.void-gradient{font-size:2.6rem;font-weight:800;letter-spacing:-.5px;background:linear-gradient(135deg,#4facfe,#00f2fe 45%,#a18cd1);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
-.void-sub{font-size:1.08rem;color:#8b949e!important;margin-bottom:20px}
-.topbar-brand{display:flex;align-items:center;gap:12px;margin-bottom:14px}
-.topbar-title{font-size:1.4rem;font-weight:800;letter-spacing:2px;color:#fff}
-.topbar-pill{font-size:.65rem;padding:3px 9px;border-radius:99px;background:rgba(79,172,254,.15);color:#4facfe;border:1px solid rgba(79,172,254,.35);font-weight:700}
-.stButton button{border-radius:12px!important;border:1px solid rgba(128,128,128,.22)!important;transition:all .2s ease!important}
-.stButton button:hover{border-color:#4facfe!important;box-shadow:0 0 12px rgba(79,172,254,.25)!important}
+.block-container{padding-top:1rem!important;padding-bottom:3rem!important;max-width:1420px}
+section[data-testid="stSidebar"]{background:#0d1117!important;border-right:1px solid rgba(59,130,246,.15)}
+.stChatMessage{border-radius:16px;padding:18px 22px;margin-bottom:14px;border:1px solid rgba(59,130,246,.2);background:rgba(24,31,44,.85)!important;box-shadow:0 6px 24px rgba(0,0,0,.3)}
+.prism-card{background:#161d2a;border:1px solid rgba(59,130,246,.3);border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.void-hero{text-align:center;padding:28px 10px 20px}
+.void-gradient{font-size:2.8rem;font-weight:800;letter-spacing:-.5px;background:linear-gradient(135deg,#3b82f6,#60a5fa 40%,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
+.void-sub{font-size:1.12rem;color:#94a3b8!important;margin-bottom:22px}
+.topbar-brand{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.topbar-title{font-size:1.45rem;font-weight:800;letter-spacing:2px;color:#fff}
+.topbar-pill{font-size:.65rem;padding:3px 10px;border-radius:99px;background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.4);font-weight:700}
+.stButton button{border-radius:12px!important;border:1px solid rgba(148,163,184,.2)!important;background:#1e293b!important;color:#f8fafc!important;transition:all .2s ease!important;font-weight:600!important}
+.stButton button:hover{border-color:#3b82f6!important;background:#2563eb!important;box-shadow:0 0 14px rgba(59,130,246,.4)!important}
 </style>""", unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
@@ -67,9 +68,9 @@ OTP_TTL, OTP_MAX_TRIES, OTP_COOLDOWN, LOGIN_DAYS = 600, 5, 30, 30
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 
 ENGINES = {
+    "☀️ Supernova X (Master Coding Architect)": "qwen/qwen-2.5-coder-32b-instruct",
+    "🪐 Nebula Core (Deep Logic Engine)": "deepseek/deepseek-chat",
     "🌙 Void Moon (Swift Resonance)": "google/gemini-2.5-flash",
-    "🪐 Nebula Core (Deep Logic)": "deepseek/deepseek-chat",
-    "☀️ Supernova X (Master Architect)": "qwen/qwen-2.5-coder-32b-instruct",
 }
 
 def sget(key, default=""):
@@ -91,7 +92,7 @@ def esc(s):
 def safe_name(s, n=25):
     return re.sub(r"\W+", "_", s).strip("_")[:n] or "VOID"
 
-# ============================== 3. DATABASE (atomic writes) ==============================
+# ============================== 3. DATABASE ==============================
 def load_db():
     try:
         with open(DB_FILE, encoding="utf-8") as f:
@@ -300,17 +301,17 @@ def generate_real_pdf_bytes(title, markdown, author="VOID Forge"):
     return bytes(out)
 
 SLIDE_TPL = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>%%TITLE%%</title><style>
-body{margin:0;background:#080b12;color:#f0f6fc;font-family:'Segoe UI',system-ui,sans-serif;display:flex;flex-direction:column;height:96vh;justify-content:space-between}
+body{margin:0;background:#11151c;color:#f0f6fc;font-family:'Segoe UI',system-ui,sans-serif;display:flex;flex-direction:column;height:96vh;justify-content:space-between}
 .wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
-.slide{display:none;width:100%;max-width:780px;background:linear-gradient(145deg,#101624,#0b0f17);border:1px solid rgba(79,172,254,.35);border-radius:20px;padding:36px 42px;box-shadow:0 15px 40px rgba(0,0,0,.6);min-height:290px;box-sizing:border-box}
+.slide{display:none;width:100%;max-width:820px;background:linear-gradient(145deg,#181f2c,#11151c);border:1px solid rgba(59,130,246,.4);border-radius:24px;padding:40px 48px;box-shadow:0 20px 50px rgba(0,0,0,.7);min-height:310px;box-sizing:border-box}
 .slide.on{display:block}
-.badge{font-size:11px;letter-spacing:1.5px;color:#4facfe;font-weight:700;margin-bottom:12px}
-h2{margin-top:0;font-size:26px;background:linear-gradient(90deg,#4facfe,#c471ed);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.body{font-size:16px;line-height:1.65;color:#c9d1d9}
-code{background:#1b2333;padding:1px 6px;border-radius:5px}
-.ctl{display:flex;justify-content:center;gap:14px;padding:12px}
-button{background:rgba(79,172,254,.15);color:#4facfe;border:1px solid rgba(79,172,254,.4);padding:8px 20px;border-radius:99px;cursor:pointer;font-weight:600}
-button:hover{background:#4facfe;color:#080b12}
+.badge{font-size:11px;letter-spacing:2px;color:#3b82f6;font-weight:700;margin-bottom:14px}
+h2{margin-top:0;font-size:28px;background:linear-gradient(90deg,#3b82f6,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.body{font-size:16px;line-height:1.7;color:#cbd5e1}
+code{background:#1e293b;padding:1px 6px;border-radius:5px}
+.ctl{display:flex;justify-content:center;gap:16px;padding:14px}
+button{background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.5);padding:10px 22px;border-radius:99px;cursor:pointer;font-weight:700;transition:.2s}
+button:hover{background:#3b82f6;color:#fff;box-shadow:0 0 15px rgba(59,130,246,.5)}
 @media print{.ctl{display:none}body{height:auto;background:#fff}.slide{display:block;page-break-after:always;margin-bottom:16px}}
 </style></head><body><div class="wrap">%%SLIDES%%</div>
 <div class="ctl"><button onclick="go(-1)">◀ Previous</button><button onclick="window.print()">🖨️ Export to PDF</button><button onclick="go(1)">Next ▶</button></div>
@@ -369,7 +370,7 @@ def _post(choice, system, msgs, temp, tokens, stream=False):
     if not API_KEY:
         raise EngineError("Master key missing: add OPENROUTER_API_KEY to your app secrets.")
     msgs = [{"role": m["role"], "content": m["content"]} for m in msgs[-MAX_HISTORY:]]
-    body = {"model": ENGINES.get(choice, "google/gemini-2.5-flash"), "temperature": temp,
+    body = {"model": ENGINES.get(choice, "qwen/qwen-2.5-coder-32b-instruct"), "temperature": temp,
             "max_tokens": tokens, "stream": stream, "messages": [{"role": "system", "content": system}] + msgs}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json", "X-Title": "VOID"}
     try:
@@ -546,7 +547,8 @@ with st.sidebar:
 c1, c2, c3, c4 = st.columns([1.9, 1.8, 1.7, 1.2])
 with c1:
     ui_mode = st.selectbox("Dimension", ["✦ VOID Core & Prism", "📖 VOID Codex (Study, PDF & Slides)",
-                                        "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab"], label_visibility="collapsed")
+                                        "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab",
+                                        "🧬 Self-Evolution Lab"], label_visibility="collapsed")
 with c2:
     cosmic_entity = st.selectbox("Cosmic Engine", list(ENGINES), label_visibility="collapsed")
 with c3:
@@ -565,15 +567,15 @@ with c4:
                 st.error("Unable to read this file as text.")
         task_depth = st.select_slider("Depth", ["Swift", "Balanced", "Maximum Power"], value="Maximum Power")
         temperature = st.slider("Creativity", 0.0, 1.0, 0.25, 0.05)
-        max_tokens = st.slider("Max Output Length", 500, 4000, 2200, 100)
+        max_tokens = st.slider("Max Output Length", 500, 4000, 3200, 100)
 
 def build_system_prompt(query, is_prism=False, extra=""):
     fmt = ("The user wants a formal document, study guide, PDF, slides, or web app. Use clean Markdown headings (# and ##) "
            "and bullet points so VOID Prism can compile it into a PDF and slide deck."
            if is_prism else
            "Respond naturally and conversationally. Do NOT format casual chat as formal reports unless the user asks for a PDF, notes, or slides.")
-    return f"""You are VOID, a sovereign cosmic intelligence and digital workspace created by {FOUNDER_NAME}.
-Never mention any outside company or model names; you are strictly VOID, powered by the Cosmic Engines (Void Moon, Nebula Core, Supernova X).
+    return f"""You are VOID, an elite sovereign coding intelligence and digital workspace created by {FOUNDER_NAME}.
+Never mention any outside company or model names; you are strictly VOID, powered by the Cosmic Engines (Supernova X, Nebula Core, Void Moon).
 
 === CURRENT OPERATOR ===
 Name: {user_name} | Email: {user_email} | City: {user_city}
@@ -667,7 +669,7 @@ if ui_mode == "✦ VOID Core & Prism":
             save_db(db)
             st.rerun()
         else:
-            current_chat["messages"].pop()  # keep history alternating user/assistant
+            current_chat["messages"].pop()
             save_db(db)
 
     if prism_open and prism_col is not None:
@@ -814,3 +816,25 @@ elif ui_mode == "🛠️ Side-by-Side Code Lab":
             st.markdown(st.session_state.lab_result)
         else:
             st.info("Paste code on the left and click Transform.")
+
+# ============================== DIMENSION 5: SELF-EVOLUTION LAB ==============================
+elif ui_mode == "🧬 Self-Evolution Lab":
+    st.markdown("### 🧬 VOID Self-Evolution & Meta-Coding Lab")
+    st.caption("Use VOID's maximum coding power to inspect, upgrade, or add new features directly to VOID itself.")
+    
+    evo_goal = st.text_area("What upgrade or new feature should VOID build for itself?", height=100,
+                            placeholder="E.g., Add a Pomodoro timer sidebar widget, or add speech-to-text input...")
+    if st.button("⚡ Execute Self-Upgrade", type="primary"):
+        if evo_goal.strip():
+            evo_sys = (
+                f"You are the master core architect of VOID. The founder ({FOUNDER_NAME}) wants to upgrade VOID with the following feature: '{evo_goal}'. "
+                "Provide complete, clean Python code modifications or additions (using Streamlit) so Avyan can easily copy and paste them into app.py."
+            )
+            with st.spinner("Analyzing app architecture and generating upgrade..."):
+                res, err = call_void_engine("☀️ Supernova X (Master Coding Architect)", evo_sys, [{"role": "user", "content": evo_goal}], 0.2, 3500)
+            if res:
+                st.session_state.evo_result = res
+            else:
+                st.error(err)
+        else:
+      ------------------
