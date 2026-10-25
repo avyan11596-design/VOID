@@ -35,25 +35,69 @@ try:
 except Exception:
     pass
 
-# --- MATERIAL SLATE OS THEME ---
+# --- MATERIAL SLATE OS THEME & ABSOLUTE TEXT READABILITY FIXES ---
 st.markdown("""<style>
-.stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"]{background-color:#11151c!important;color:#e2e8f0!important}
-[data-testid="stForm"]{background:linear-gradient(145deg,#181f2c,#11151c)!important;border:1px solid rgba(59,130,246,.25)!important;border-radius:18px!important;padding:24px!important;box-shadow:0 12px 35px rgba(0,0,0,.4)!important}
-[data-testid="stToolbarActions"],[data-testid="stAppDeployButton"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important}
-#MainMenu,footer{visibility:hidden!important}
-header[data-testid="stHeader"]{background:transparent!important}
-.block-container{padding-top:1rem!important;padding-bottom:3rem!important;max-width:1420px}
-section[data-testid="stSidebar"]{background:#0d1117!important;border-right:1px solid rgba(59,130,246,.15)}
-.stChatMessage{border-radius:16px;padding:18px 22px;margin-bottom:14px;border:1px solid rgba(59,130,246,.2);background:rgba(24,31,44,.85)!important;box-shadow:0 6px 24px rgba(0,0,0,.3)}
-.prism-card{background:#161d2a;border:1px solid rgba(59,130,246,.3);border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
-.void-hero{text-align:center;padding:28px 10px 20px}
-.void-gradient{font-size:2.8rem;font-weight:800;letter-spacing:-.5px;background:linear-gradient(135deg,#3b82f6,#60a5fa 40%,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px}
-.void-sub{font-size:1.12rem;color:#94a3b8!important;margin-bottom:22px}
-.topbar-brand{display:flex;align-items:center;gap:12px;margin-bottom:16px}
-.topbar-title{font-size:1.45rem;font-weight:800;letter-spacing:2px;color:#fff}
-.topbar-pill{font-size:.65rem;padding:3px 10px;border-radius:99px;background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.4);font-weight:700}
-.stButton button{border-radius:12px!important;border:1px solid rgba(148,163,184,.2)!important;background:#1e293b!important;color:#f8fafc!important;transition:all .2s ease!important;font-weight:600!important}
-.stButton button:hover{border-color:#3b82f6!important;background:#2563eb!important;box-shadow:0 0 14px rgba(59,130,246,.4)!important}
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+    background-color: #11151c !important;
+    color: #f8fafc !important;
+}
+[data-testid="stForm"] {
+    background: linear-gradient(145deg, #181f2c, #11151c) !important;
+    border: 1px solid rgba(59,130,246,.3) !important;
+    border-radius: 18px !important;
+    padding: 24px !important;
+    box-shadow: 0 12px 35px rgba(0,0,0,.5) !important;
+}
+[data-testid="stToolbarActions"], [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {
+    display: none !important;
+}
+#MainMenu, footer { visibility: hidden !important; }
+header[data-testid="stHeader"] { background: transparent !important; }
+.block-container { padding-top: 1rem !important; padding-bottom: 5rem !important; max-width: 1420px; }
+section[data-testid="stSidebar"] { background: #0d1117 !important; border-right: 1px solid rgba(59,130,246,.15); }
+
+/* HIGH CONTRAST TEXT GLOBALS */
+p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
+    color: #f8fafc !important;
+}
+.stChatMessage {
+    border-radius: 16px;
+    padding: 18px 22px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(59,130,246,0.3);
+    background: rgba(24,31,44,0.98) !important;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+}
+.stChatMessage p, .stChatMessage div, .stChatMessage span, .stChatMessage li {
+    color: #ffffff !important;
+    font-size: 1.03rem !important;
+}
+
+/* FIX CHAT INPUT BOX (NO MORE WHITE BOX / INVISIBLE TEXT) */
+[data-testid="stChatInput"] {
+    background-color: #161d2a !important;
+    border: 1px solid #3b82f6 !important;
+    border-radius: 16px !important;
+}
+[data-testid="stChatInput"] textarea {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    background-color: transparent !important;
+}
+[data-testid="stChatInput"] textarea::placeholder {
+    color: #94a3b8 !important;
+    -webkit-text-fill-color: #94a3b8 !important;
+}
+
+.prism-card { background: #161d2a; border: 1px solid rgba(59,130,246,.35); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.void-hero { text-align: center; padding: 28px 10px 20px; }
+.void-gradient { font-size: 2.8rem; font-weight: 800; letter-spacing: -.5px; background: linear-gradient(135deg,#3b82f6,#60a5fa 40%,#a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 6px; }
+.void-sub { font-size: 1.12rem; color: #cbd5e1 !important; margin-bottom: 22px; }
+.topbar-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.topbar-title { font-size: 1.45rem; font-weight: 800; letter-spacing: 2px; color: #fff; }
+.topbar-pill { font-size: .65rem; padding: 3px 10px; border-radius: 99px; background: rgba(59,130,246,0.25); color: #60a5fa; border: 1px solid rgba(59,130,246,.5); font-weight: 700; }
+.stButton button { border-radius: 12px !important; border: 1px solid rgba(148,163,184,.3) !important; background: #1e293b !important; color: #f8fafc !important; transition: all .2s ease !important; font-weight: 600 !important; }
+.stButton button:hover { border-color: #3b82f6 !important; background: #2563eb !important; box-shadow: 0 0 14px rgba(59,130,246,.5) !important; }
 </style>""", unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
@@ -64,7 +108,7 @@ WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 WIKI_URL = "https://en.wikipedia.org/w/api.php"
 DB_FILE, KEY_FILE = "void_hub_db.json", ".void_signing_key"
 MAX_HISTORY, MAX_FILE_CHARS = 24, 40000
-OTP_TTL, OTP_MAX_TRIES, OTP_COOLDOWN, LOGIN_DAYS = 600, 5, 30, 30
+OTP_TTL, OTP_MAX_TRIES, OTP_COOLDOWN, LOGIN_DAYS = 600, 5, 30, 365
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 
 ENGINES = {
@@ -137,7 +181,7 @@ def ensure_user(email, name=None):
     save_db(db)
     return rec
 
-# ============================== 4. SIGNED LOGIN TOKENS ==============================
+# ============================== 4. BULLETPROOF SIGNED LOGIN ==============================
 def signing_key():
     k = sget("APP_SECRET")
     if k:
@@ -405,7 +449,7 @@ def stream_void_engine(choice, system, msgs, temp=0.25, tokens=2000):
         if delta:
             yield delta
 
-# ============================== 8. AUTHENTICATION GATE ==============================
+# ============================== 8. AUTHENTICATION GATE & PERSISTENCE FIX ==============================
 if "user_email" not in st.session_state:
     restored = restore_login()
     if restored:
@@ -464,6 +508,9 @@ if "user_email" not in st.session_state:
                     else:
                         st.error("❌ Incorrect code. Please try again.")
     st.stop()
+else:
+    # Always refresh login state query params so session remains active across re-runs
+    remember_login(st.session_state.user_email)
 
 # ============================== 9. ACTIVE USER ==============================
 user_email = st.session_state.user_email
