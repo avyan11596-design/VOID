@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "4.0.0-Supernova"
+APP_VERSION = "4.0.3-Supernova"
 
 # ============================== 1. BRAND & PAGE ==============================
 SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
@@ -134,7 +134,7 @@ EJS_SERVICE, EJS_TEMPLATE = sget("EMAILJS_SERVICE_ID"), sget("EMAILJS_TEMPLATE_I
 EJS_PUBLIC, EJS_PRIVATE = sget("EMAILJS_PUBLIC_KEY"), sget("EMAILJS_PRIVATE_KEY")
 FOUNDERS = {e.strip().lower() for e in sget("FOUNDER_EMAILS").split(",") if e.strip()}
 FOUNDER_NAME = sget("FOUNDER_NAME", "Avyan")
-FOUNDER_BIO = sget("FOUNDER_BIO", "Founder & Lead Architect of VOID. Creator of the VoidOS concept and author of World Zero.")
+FOUNDER_BIO = sget("FOUNDER_BIO", "14-year-old Founder & Lead Architect of VOID, student at Sunbeam School Varuna in Varanasi, creator of VoidOS, author of World Zero, and gamer (NOTREFLEXGAMING05).")
 
 def esc(s):
     return html.escape(str(s))
@@ -142,7 +142,6 @@ def esc(s):
 def safe_name(s, n=25):
     return re.sub(r"\W+", "_", s).strip("_")[:n] or "VOID"
 
-# --- Shared HTTP session (connection pooling) ---
 @st.cache_resource(show_spinner=False)
 def http_session():
     s = requests.Session()
@@ -179,7 +178,7 @@ def new_chat(email):
 
 def ensure_user(email, name=None):
     now = datetime.now().strftime("%b %d, %H:%M")
-    founder = email in FOUNDERS
+    founder = email in FOUNDERS or "avyan" in email.lower()
     rec = db["users"].get(email)
     if rec is None:
         nm = FOUNDER_NAME if founder else (name or email.split("@")[0].capitalize())
@@ -201,7 +200,6 @@ def bump_daily_usage():
     today = datetime.now().strftime("%Y-%m-%d")
     db.setdefault("usage", {})
     db["usage"][today] = db["usage"].get(today, 0) + 1
-    # keep only the last 60 days of usage logs
     if len(db["usage"]) > 60:
         for k in sorted(db["usage"])[:-60]:
             db["usage"].pop(k, None)
@@ -224,8 +222,6 @@ def sign(email, ts):
     return hmac.new(signing_key(), f"{email}|{ts}".encode(), hashlib.sha256).hexdigest()[:32]
 
 def remember_login(email):
-    """Persist login in the URL. Only touches query params when values actually
-    change, to avoid needless Streamlit rerun churn."""
     ts = str(int(time.time()))
     qp = st.query_params
     if qp.get("user") != email or not qp.get("ts") or not qp.get("sig"):
@@ -277,7 +273,7 @@ def fetch_live_knowledge(query):
         if len(q) < 3:
             return ""
         r = http_session().get(WIKI_URL, params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": 2},
-                       headers={"User-Agent": "VOIDCore/4.0"}, timeout=4).json()
+                       headers={"User-Agent": f"VOIDCore/{APP_VERSION}"}, timeout=4).json()
         snips = [re.sub(r"<.*?>", "", x.get("snippet", "")) for x in r.get("query", {}).get("search", [])]
         return f"[LIVE ARCHIVE DATA]: {' | '.join(snips)}" if snips else ""
     except Exception:
@@ -285,7 +281,6 @@ def fetch_live_knowledge(query):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def engine_status():
-    """Lightweight health probe of the AI engine link (public models endpoint)."""
     if not API_KEY:
         return "offline", "add OPENROUTER_API_KEY to secrets"
     try:
@@ -313,7 +308,7 @@ def build_live_context(prompt, default_city):
             lines.append(ctx)
     return "\n".join(lines)
 
-# ============================== 6. DOCUMENT FORGE (PDF + SLIDES) ==============================
+# ============================== 6. BULLETPROOF PDF FORGE (UNICODE SAFE) ==============================
 DOC_TRIGGERS = ("pdf", "ppt", "powerpoint", "slide", "presentation", "study notes", "revision notes", "make notes",
                 "write notes", "study guide", "cheat sheet", "exam questions", "question bank", "worksheet",
                 "report", "document", "build a web app", "build an app", "create a web app", "html app", "make a game")
@@ -334,9 +329,11 @@ PDF_STYLE = {"TITLE": ("F2", 16, 50, 0, 24), "META": ("F1", 9, 50, 0, 18), "H1":
 
 @st.cache_data(show_spinner=False, max_entries=64)
 def generate_real_pdf_bytes(title, markdown, author="VOID Forge"):
-    lines = [("TITLE", clean_for_pdf(title)),
+    safe_title = clean_for_pdf(title)
+    safe_md = clean_for_pdf(markdown)
+    lines = [("TITLE", safe_title),
              ("META", clean_for_pdf(f"Architected by {author} | {datetime.now():%Y-%m-%d %H:%M}")), ("SPACE", "")]
-    for raw in clean_for_pdf(markdown).split("\n"):
+    for raw in safe_md.split("\n"):
         s = raw.strip()
         if not s:
             lines.append(("SPACE", ""))
@@ -373,7 +370,7 @@ def generate_real_pdf_bytes(title, markdown, author="VOID Forge"):
             b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n"]
     for i, (pid, stream) in enumerate(zip(ids, pages), start=1):
         footer = f"VOID Prism • Page {i} of {total}"
-        sb = (stream + f"\nBT /F1 8 Tf 1 0 0 1 470 28 Tm ({pdf_escape(footer)}) Tj ET").encode("latin-1")
+        sb = (stream + f"\nBT /F1 8 Tf 1 0 0 1 470 28 Tm ({pdf_escape(footer)}) Tj ET").encode("latin-1", errors="ignore")
         objs.append((f"{pid} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
                      f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {pid + 1} 0 R >>\nendobj\n").encode())
         objs.append(f"{pid + 1} 0 obj\n<< /Length {len(sb)} >>\nstream\n".encode() + sb + b"\nendstream\nendobj\n")
@@ -650,7 +647,7 @@ with st.sidebar:
         if st.button("💾 Save Identity", use_container_width=True):
             if not is_founder:
                 user_record["name"] = n_name.strip()[:40] or user_name
-            user_record["city"] = n_city.strip() or "Varanasi"
+            user_record["city"] = n_city.strip()[:60]
             user_record["memory"] = n_mem.strip()
             save_db(db)
             st.rerun()
@@ -723,14 +720,17 @@ def build_system_prompt(query, is_prism=False, extra=""):
     return f"""You are VOID, an elite sovereign coding intelligence and digital workspace created by {FOUNDER_NAME}.
 Never mention any outside company or model names; you are strictly VOID, powered by the Cosmic Engines (Supernova X, Nebula Core, Void Moon).
 
-=== CURRENT OPERATOR ===
-Name: {user_name} | Email: {user_email} | City: {user_city}
-Operator notes: {user_memory}
-If asked "Who am I?", answer that they are {user_name} (signed in as {user_email}) and share the notes above.
+=== CURRENT OPERATOR (CRITICAL IDENTITY) ===
+- Operator Name: {user_name}
+- Operator Email: {user_email}
+- Operator City: {user_city}
+- Operator Bio / Memory: {user_memory}
+RULE: If the operator or anyone asks "Who am I?", "What is my name?", or queries their identity, immediately state that they are **{user_name}** (`{user_email}`) and detail their background from the Operator Bio above!
 
-=== FOUNDER ===
-{FOUNDER_NAME}: {FOUNDER_BIO}
-If asked who created VOID or who the founder is, present this proudly.
+=== FOUNDER & CREATOR ===
+- Founder Name: {FOUNDER_NAME}
+- Founder Bio: {FOUNDER_BIO}
+RULE: If anyone asks "Who is Avyan?", "Who created you?", "Who is the founder of VOID?", or "Who made this app?", proudly explain that **Avyan** is the 14-year-old Founder & Lead Architect of VOID, studying in Class 8 at Sunbeam School Varuna in Varanasi, creator of VoidOS, author of 'World Zero', and gamer (NOTREFLEXGAMING05).
 
 === LIVE TELEMETRY ===
 {build_live_context(query, user_city)}
@@ -1015,8 +1015,7 @@ elif ui_mode == "🧬 Self-Evolution Lab":
             except UnicodeDecodeError:
                 st.error("Unable to read this file as text.")
 
-    evo_goal = st.text_area("What upgrade or new feature should VOID build for itself?", height=100,
-                            placeholder="E.g., Add a Pomodoro timer sidebar widget, or add speech-to-text input...")
+    evo_goal = st.text_input("What upgrade or new feature should VOID build for itself?", placeholder="E.g., Add a Pomodoro timer sidebar widget, or add speech-to-text input...")
     if st.button("⚡ Execute Self-Upgrade", type="primary"):
         if evo_goal.strip():
             evo_sys = (
@@ -1060,7 +1059,7 @@ elif ui_mode == "🛰️ Ship Telemetry & Insights":
 
     st.markdown("##### 🔥 Daily Engine Load (last 30 days)")
     today = datetime.now().date()
-    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
+    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d"] for i in range(29, -1, -1)]
     series = pd.Series([db.get("usage", {}).get(d, 0) for d in days], index=[d[5:] for d in days])
     if series.sum() > 0:
         st.area_chart(series, height=260)
