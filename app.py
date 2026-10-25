@@ -16,7 +16,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "4.0.6-Supernova"
+APP_VERSION = "4.2.0-Supernova"
 
 # ============================== 1. BRAND & PAGE ==============================
 SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
@@ -76,7 +76,7 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     font-size: 1.03rem !important;
 }
 
-/* FIX CHAT INPUT BOX (NO MORE WHITE BOX / INVISIBLE TEXT) */
+/* FIX CHAT INPUT BOX */
 [data-testid="stChatInput"] {
     background-color: #161d2a !important;
     border: 1px solid #3b82f6 !important;
@@ -308,7 +308,7 @@ def build_live_context(prompt, default_city):
             lines.append(ctx)
     return "\n".join(lines)
 
-# ============================== 6. BULLETPROOF PDF FORGE (UNICODE SAFE) ==============================
+# ============================== 6. DOCUMENT FORGE (PDF + SLIDES) ==============================
 DOC_TRIGGERS = ("pdf", "ppt", "powerpoint", "slide", "presentation", "study notes", "revision notes", "make notes",
                 "write notes", "study guide", "cheat sheet", "exam questions", "question bank", "worksheet",
                 "report", "document", "build a web app", "build an app", "create a web app", "html app", "make a game")
@@ -465,7 +465,7 @@ def _post(choice, system, msgs, temp, tokens, stream=False):
             "max_tokens": tokens, "stream": stream, "messages": [{"role": "system", "content": system}] + msgs}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     last_err = None
-    for attempt in range(2):  # one automatic retry on transient connection failures
+    for attempt in range(2):
         try:
             r = http_session().post(OPENROUTER_URL, headers=headers, json=body, timeout=90, stream=stream)
             if r.status_code == 429 or r.status_code >= 500:
@@ -509,9 +509,7 @@ def stream_void_engine(choice, system, msgs, temp=0.25, tokens=2000):
         if delta:
             yield delta
 
-
 def clean_stream(gen):
-    """Buffer the raw token stream into larger, smoother chunks (calm typing mode)."""
     buf = ""
     for chunk in gen:
         buf += chunk
@@ -520,23 +518,50 @@ def clean_stream(gen):
             buf = ""
     if buf:
         yield buf
-# ============================== 8. AUTHENTICATION GATE & PERSISTENCE FIX ==============================
+
+# ============================== 8. AUTHENTICATION GATE & DUAL GUEST/OTP LOGIN ==============================
 if "user_email" not in st.session_state:
     restored = restore_login()
     if restored:
         st.session_state.user_email = restored
 
 if "user_email" not in st.session_state:
-    st.markdown(f'<div class="void-hero"><img src="{LOGO_B64}" width="72" style="margin-bottom:14px;"/>'
-                '<div class="void-gradient">Welcome to VOID</div><div class="void-sub">Secure OTP Authentication Gateway</div></div>',
+    st.markdown(f'<div class="void-hero"><img src="{LOGO_B64}" width="82" style="margin-bottom:14px;"/>'
+                '<div class="void-gradient">VOID Sovereign Intelligence</div>'
+                '<div class="void-sub">Direct Search Landing & Access Gateway</div></div>',
                 unsafe_allow_html=True)
-    _, mid, _ = st.columns([1, 1.3, 1])
+    
+    _, mid, _ = st.columns([1, 1.4, 1])
     with mid:
+        st.markdown("<p style='text-align:center; color:#94a3b8; font-size:0.95rem; margin-bottom:10px;'>Ask anything right now to enter instantly as a Guest</p>", unsafe_allow_html=True)
+        with st.form("landing_search_form"):
+            landing_query = st.text_input("Direct Search / Prompt", placeholder="What would you like to build, solve, or learn today?", label_visibility="collapsed")
+            col_search_btn, col_guest_btn = st.columns(2)
+            with col_search_btn:
+                search_submit = st.form_submit_button("⚡ Search & Launch", type="primary", use_container_width=True)
+            with col_guest_btn:
+                guest_submit = st.form_submit_button("🛡️ Enter Guest Mode", type="secondary", use_container_width=True)
+
+            if search_submit or guest_submit:
+                guest_email = f"guest_{uuid.uuid4().hex[:6]}@void.os"
+                ensure_user(guest_email, name="Guest Operator")
+                st.session_state.user_email = guest_email
+                remember_login(guest_email)
+                if search_submit and landing_query.strip():
+                    cid = list(db["chats"][guest_email].keys())[-1]
+                    db["chats"][guest_email][cid]["messages"].append({"role": "user", "content": landing_query.strip()})
+                    t = landing_query.strip().replace("\n", " ")
+                    db["chats"][guest_email][cid]["title"] = t[:26] + "..." if len(t) > 26 else t
+                    save_db(db)
+                st.rerun()
+
+        st.markdown("<div style='text-align:center; margin: 15px 0; color:#475569;'>─────── or sign in with email OTP ───────</div>", unsafe_allow_html=True)
+
         if "pending_email" not in st.session_state:
             with st.form("email_form"):
                 email_in = st.text_input("Email Address", placeholder="name@example.com", max_chars=80).strip().lower()
                 name_in = st.text_input("Display Name", placeholder="Your name", max_chars=40).strip()
-                if st.form_submit_button("Send Verification Code", type="primary", use_container_width=True):
+                if st.form_submit_button("Send Verification Code", use_container_width=True):
                     wait = OTP_COOLDOWN - (time.time() - st.session_state.get("last_otp_ts", 0))
                     if not EMAIL_RE.match(email_in):
                         st.error("Please enter a valid email address.")
@@ -580,7 +605,6 @@ if "user_email" not in st.session_state:
                         st.error("❌ Incorrect code. Please try again.")
     st.stop()
 else:
-    # Always refresh login state query params so session remains active across re-runs
     remember_login(st.session_state.user_email)
 
 # ============================== 9. ACTIVE USER ==============================
@@ -792,6 +816,11 @@ if ui_mode == "✦ VOID Core & Prism":
 
     typed = st.chat_input(f"Command VOID, {user_name} — chat naturally, or ask for a PDF, slides, weather, or web app...")
     active_prompt = quick_prompt or typed
+
+    # Auto-trigger response if user typed a query directly on the landing page search bar
+    if not active_prompt and len(current_chat["messages"]) == 1 and current_chat["messages"][0]["role"] == "user":
+        active_prompt = current_chat["messages"][0]["content"]
+        current_chat["messages"].pop()
 
     if active_prompt:
         full_prompt = f"Attached file (`{uploaded_file.name}`):\n```\n{file_context}\n```\n\n{active_prompt}" if file_context else active_prompt
