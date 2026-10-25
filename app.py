@@ -23,7 +23,7 @@ if not os.path.exists("void_logo.svg"):
 LOGO_PATH = "logo.png" if os.path.exists("logo.png") else ("void_logo.svg" if os.path.exists("void_logo.svg") else "⚡")
 
 st.set_page_config(
-    page_title="VOID",
+    page_title="VOID AI Workspace & Study Hub",
     page_icon=LOGO_PATH,
     layout="wide",
     initial_sidebar_state="expanded"
@@ -35,10 +35,13 @@ try:
 except Exception:
     pass
 
-# --- 2. ADVANCED FUTURISTIC UI & THEME CSS ---
+# --- 2. SEO & FUTURISTIC UI CSS ---
 st.markdown("""
+<head>
+    <meta name="description" content="VOID is an advanced AI workspace, study notebook, live web app studio, and code refactor lab created by Avyan.">
+    <meta name="author" content="Avyan">
+</head>
 <style>
-/* Global Resets & Clean Layout */
 div[data-testid="stToolbarActions"] { display: none !important; }
 div[data-testid="stAppDeployButton"] { display: none !important; }
 div[data-testid="stDecoration"] { display: none !important; }
@@ -52,14 +55,10 @@ header[data-testid="stHeader"] { background: transparent !important; }
     padding-bottom: 2.5rem !important;
     max-width: 1160px;
 }
-
-/* Glassmorphism Sidebar */
 section[data-testid="stSidebar"] {
     background-color: #080a0f;
     border-right: 1px solid rgba(79, 172, 254, 0.1);
 }
-
-/* Chat Bubbles Styling */
 .stChatMessage {
     border-radius: 18px;
     padding: 16px 20px;
@@ -68,8 +67,6 @@ section[data-testid="stSidebar"] {
     background: rgba(14, 17, 23, 0.6);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
-
-/* Hero Section */
 .void-hero {
     text-align: center;
     padding: 32px 10px 24px 10px;
@@ -88,8 +85,6 @@ section[data-testid="stSidebar"] {
     color: #8b949e;
     margin-bottom: 24px;
 }
-
-/* Topbar Brand Badge */
 .topbar-brand {
     display: flex;
     align-items: center;
@@ -113,8 +108,6 @@ section[data-testid="stSidebar"] {
     font-weight: 600;
     letter-spacing: 1px;
 }
-
-/* Quick Action Cards */
 .stButton button {
     border-radius: 12px !important;
     border: 1px solid rgba(128, 128, 128, 0.2) !important;
@@ -216,7 +209,10 @@ def call_void_engine(cosmic_choice, system_prompt, messages_list, temp=0.2, toke
 def extract_code_blocks(markdown_text):
     return re.findall(r"```(\w+)?\n(.*?)```", markdown_text, re.DOTALL)
 
-# --- 4. SECURE AUTHENTICATION GATE ---
+# --- 4. PERSISTENT AUTHENTICATION GATE (NO RE-LOGGING) ---
+if "user_email" not in st.session_state and "user" in st.query_params:
+    st.session_state.user_email = st.query_params["user"]
+
 if "user_email" not in st.session_state:
     st.markdown(f'<div class="void-hero"><img src="{LOGO_B64}" width="72" style="margin-bottom:14px;"/><div class="void-gradient">Welcome to VOID</div><div class="void-sub">Secure Email OTP Authentication Gateway</div></div>', unsafe_allow_html=True)
     
@@ -268,6 +264,7 @@ if "user_email" not in st.session_state:
                             
                         save_db(db)
                         st.session_state.user_email = email_input
+                        st.query_params["user"] = email_input  # Saves login permanently in URL session
                         st.session_state.current_chat_id = list(db["chats"][email_input].keys())[-1]
                         
                         del st.session_state.pending_email
@@ -345,15 +342,17 @@ with st.sidebar:
 
     st.caption(f"Signed in as `{user_email}`")
     if st.button("Switch Account", use_container_width=True):
+        if "user" in st.query_params:
+            del st.query_params["user"]
         del st.session_state.user_email
         st.rerun()
 
-# --- 6. TOP CONTROL BAR & COSMIC SWITCHER ---
+# --- 6. TOP CONTROL BAR & INTERFACE SELECTOR ---
 top_c1, top_c2, top_c3, top_c4 = st.columns([1.8, 1.8, 1.8, 1.2])
 with top_c1:
     ui_mode = st.selectbox(
         "Interface",
-        ["✦ Assistant & Canvas", "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab"],
+        ["✦ Assistant & Canvas", "📖 Study Notebook", "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab"],
         label_visibility="collapsed"
     )
 with top_c2:
@@ -418,7 +417,7 @@ if ui_mode == "✦ Assistant & Canvas":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    typed_prompt = st.chat_input("Ask VOID anything, or describe an app to build...")
+    typed_prompt = st.chat_input("Ask VOID anything (weather, facts, coding, studies)...")
     active_prompt = quick_prompt or typed_prompt
 
     if active_prompt:
@@ -438,8 +437,8 @@ if ui_mode == "✦ Assistant & Canvas":
                 st.markdown(full_user_prompt)
 
             sys_prompt = (
-                f"You are VOID, an elite cosmic architecture entity operating in '{persona}' mode. "
-                f"Reasoning depth: {task_depth}. If asked to build a web UI, game, or component, include a complete self-contained ```html code block so the user can preview it live in VOID Canvas."
+                f"You are VOID, an elite universal AI assistant and cosmic architecture entity operating in '{persona}' mode. "
+                f"You are capable of answering any general knowledge questions, live weather updates, explanations, and coding tasks. Reasoning depth: {task_depth}."
             )
 
             with st.chat_message("assistant"):
@@ -484,7 +483,46 @@ if ui_mode == "✦ Assistant & Canvas":
                 st.info("Ask VOID to write code or build a web app in the chat, and it will automatically load here!")
 
 # =========================================================
-# INTERFACE 2: DEDICATED LIVE WEB APP STUDIO
+# INTERFACE 2: 📖 STUDY NOTEBOOK (EXPLANATIONS, NOTES, QUIZZES & PDF/PPT EXPORTS)
+# =========================================================
+elif ui_mode == "📖 Study Notebook":
+    st.markdown("### 📖 VOID Study Notebook & Exam Prep")
+    st.caption("Enter any academic topic or chapter to generate comprehensive study notes, simple explanations, practice quiz questions, and exportable slide outlines.")
+    
+    col_s1, col_s2 = st.columns([2, 1])
+    with col_s1:
+        study_topic = st.text_input("Enter Topic, Subject, or Chapter", placeholder="E.g., Photosynthesis, Newton's Laws of Motion, Mughal Empire...")
+    with col_s2:
+        study_mode = st.selectbox("Output Format", ["Comprehensive Study Notes", "Simple Explanation & Analogy", "Practice Quiz & Questions", "PPT Presentation Slide Outline"])
+
+    if st.button("✨ Generate Study Material", type="primary"):
+        if study_topic:
+            notebook_sys = (
+                f"You are an expert tutor and academic study assistant. Generate detailed, accurate, and structured study material for a student on the topic: '{study_topic}'. "
+                f"Format requested: {study_mode}. Use clear headings, bullet points, and highlight key definitions."
+            )
+            with st.spinner("Generating study notes..."):
+                notes_res, notes_err = call_void_engine(cosmic_entity, notebook_sys, [{"role": "user", "content": f"Create study material for: {study_topic}"}], 0.2, 1500)
+                if notes_res:
+                    st.session_state.last_notes = notes_res
+                else:
+                    st.error(notes_err)
+
+    if "last_notes" in st.session_state:
+        st.markdown("---")
+        st.markdown("### 📝 Generated Study Output")
+        st.markdown(st.session_state.last_notes)
+        
+        # Download buttons for PDF / PPT / Notes
+        b_col1, b_col2 = st.columns(2)
+        with b_col1:
+            st.download_button("📥 Download Notes (.md / .txt)", st.session_state.last_notes, file_name=f"study_notes_{study_topic.replace(' ', '_')}.md", use_container_width=True)
+        with b_col2:
+            ppt_text = f"# Presentation Slides: {study_topic}\n\n" + st.session_state.last_notes
+            st.download_button("📥 Download Presentation Outline (.txt)", ppt_text, file_name=f"presentation_{study_topic.replace(' ', '_')}.txt", use_container_width=True)
+
+# =========================================================
+# INTERFACE 3: DEDICATED LIVE WEB APP STUDIO
 # =========================================================
 elif ui_mode == "⚡ Live Web App Studio":
     st.markdown("### ⚡ Instant Web App & Game Generator")
@@ -512,7 +550,7 @@ elif ui_mode == "⚡ Live Web App Studio":
             st.code(st.session_state.studio_html, language="html")
 
 # =========================================================
-# INTERFACE 3: SIDE-BY-SIDE CODE REFACTOR LAB
+# INTERFACE 4: SIDE-BY-SIDE CODE REFACTOR LAB
 # =========================================================
 elif ui_mode == "🛠️ Side-by-Side Code Lab":
     st.markdown("### 🛠️ Side-by-Side Code Refactor & Bug Lab")
