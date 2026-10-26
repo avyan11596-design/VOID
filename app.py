@@ -1459,22 +1459,10 @@ def stream_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", diag=Non
                 got = True
                 yield chunk
             if got:
-                if diag is not None:# ============================== 15. UTILITY & RENDER FUNCTIONS ==============================
+               # ============================== 15. UTILITY & RENDER FUNCTIONS ==============================
 def render_footer():
     st.markdown(
         f'<div class="void-footer">VOID · Sovereign OS Intelligence · Forged by {esc(FOUNDER_NAME)} · v{APP_VERSION}</div>',
         unsafe_allow_html=True,
     )
-
-
-# Additional runtime safety checks
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-
-
-
 
