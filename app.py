@@ -1,5 +1,6 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import hashlib
 import html
 import json
 import os
@@ -24,7 +25,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# 2. PERMANENT DARK-THEME & READABILITY CSS LOCK
+# 2. PERMANENT DARK-THEME & READABILITY CSS LOCK (Inputs, Login, Chat & Buttons)
 # ==============================================================================
 def inject_void_css():
     st.markdown(
@@ -82,20 +83,42 @@ def inject_void_css():
             box-shadow: 0 0 25px rgba(99, 102, 241, 0.32) !important;
         }
 
+        /* Lock ALL Text Inputs, Password Boxes & Textareas (Login + Sidebar + Chat) */
+        div[data-baseweb="input"],
+        div[data-baseweb="base-input"],
+        div[data-baseweb="textarea"] {
+            background-color: #0d1322 !important;
+            border: 1px solid #28354e !important;
+            border-radius: 10px !important;
+            color: #f8fafc !important;
+        }
+
         [data-testid="stChatInputTextArea"],
         [data-testid="stChatInput"] textarea,
         div[data-baseweb="textarea"] textarea,
-        div[data-baseweb="input"] input {
+        div[data-baseweb="input"] input,
+        div[data-baseweb="base-input"] input {
             background-color: transparent !important;
             color: #f8fafc !important;
+            -webkit-text-fill-color: #f8fafc !important;
             caret-color: #818cf8 !important;
-            font-size: 0.96rem !important;
+            font-size: 0.95rem !important;
         }
 
-        [data-testid="stChatInputTextArea"]::placeholder,
-        [data-testid="stChatInput"] textarea::placeholder {
+        input::placeholder,
+        textarea::placeholder {
             color: #64748b !important;
+            -webkit-text-fill-color: #64748b !important;
             opacity: 1 !important;
+        }
+
+        /* Form Container Styling (For Login Portal) */
+        [data-testid="stForm"] {
+            background-color: #0b101d !important;
+            border: 1px solid #1e293b !important;
+            border-radius: 16px !important;
+            padding: 1.5rem !important;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45) !important;
         }
 
         [data-testid="stChatInputSubmitButton"] {
@@ -110,24 +133,38 @@ def inject_void_css():
         }
 
         /* Buttons Lock */
-        .stButton > button {
+        .stButton > button,
+        [data-testid="stFormSubmitButton"] > button {
             background-color: #0f1624 !important;
             color: #e2e8f0 !important;
             border: 1px solid #1f2b42 !important;
             border-radius: 999px !important;
             padding: 0.5rem 1rem !important;
-            font-weight: 500 !important;
+            font-weight: 600 !important;
             font-size: 0.88rem !important;
             transition: all 0.18s ease !important;
         }
 
         .stButton > button:hover,
         .stButton > button:focus,
-        .stButton > button:active {
+        .stButton > button:active,
+        [data-testid="stFormSubmitButton"] > button:hover {
             background-color: #17223b !important;
             color: #ffffff !important;
             border-color: #6366f1 !important;
-            box-shadow: 0 0 14px rgba(99, 102, 241, 0.25) !important;
+            box-shadow: 0 0 14px rgba(99, 102, 241, 0.28) !important;
+        }
+
+        /* Tabs Styling */
+        button[data-baseweb="tab"] {
+            background-color: transparent !important;
+            color: #94a3b8 !important;
+            font-weight: 600 !important;
+        }
+
+        button[data-baseweb="tab"][aria-selected="true"] {
+            color: #818cf8 !important;
+            border-bottom-color: #6366f1 !important;
         }
 
         /* Expanders & Metrics */
@@ -236,7 +273,7 @@ def inject_void_css():
 inject_void_css()
 
 # ==============================================================================
-# 3. SESSION STATE INITIALIZATION
+# 3. SESSION STATE & AUTHENTICATION INITIALIZATION
 # ==============================================================================
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -244,6 +281,31 @@ IST = timezone(timedelta(hours=5, minutes=30))
 def get_ist_now():
     return datetime.now(IST)
 
+
+def hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+if "users_db" not in st.session_state:
+    founder_default_pw = st.secrets.get("FOUNDER_PASSWORD", "void2026")
+    st.session_state.users_db = {
+        "avyan": {
+            "display_name": "Avyan (Founder)",
+            "pw_hash": hash_pw(founder_default_pw),
+            "role": "Founder",
+        }
+    }
+
+if "authenticated" not in st.session_state:
+    # Starts in Guest Mode so Google crawlers & instant visitors can view the app,
+    # and clicking "Log Out" in the sidebar opens the full Login / Sign-Up Portal.
+    st.session_state.authenticated = True
+
+if "auth_role" not in st.session_state:
+    st.session_state.auth_role = "Guest"
+
+if "operator_name" not in st.session_state:
+    st.session_state.operator_name = "Guest Operator"
 
 if "sessions" not in st.session_state:
     default_id = str(uuid.uuid4())[:8]
@@ -259,16 +321,12 @@ if "sessions" not in st.session_state:
 if "total_prompts" not in st.session_state:
     st.session_state.total_prompts = 0
 
-if "operator_name" not in st.session_state:
-    st.session_state.operator_name = "Guest Operator"
-
 if "prism_panel" not in st.session_state:
     st.session_state.prism_panel = False
 
 if "auto_refresh" not in st.session_state:
     st.session_state.auto_refresh = False
 
-# Reusable HTTP session for faster connection pooling
 HTTP_SESSION = requests.Session()
 HTTP_SESSION.headers.update(
     {
@@ -276,8 +334,93 @@ HTTP_SESSION.headers.update(
     }
 )
 
+
+def logout_operator():
+    """Logs out of Guest or Operator mode and opens the Login Portal."""
+    st.session_state.authenticated = False
+    st.session_state.auth_role = "LoggedOut"
+    st.session_state.operator_name = "None"
+
+
 # ==============================================================================
-# 4. SAFETY GUARDRAIL (Blocks Gore/Bloodshed, Allows All Knowledge)
+# 4. SOVEREIGN LOGIN & REGISTRATION PORTAL (Shown when Logged Out)
+# ==============================================================================
+if not st.session_state.authenticated:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="void-logo-box">V</div>
+        <div class="void-hero-title">VOID Sovereign Access</div>
+        <div class="void-hero-sub">Sign in as Founder / Operator, create a new account, or continue as Guest</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _, center_col, _ = st.columns([1, 1.35, 1])
+    with center_col:
+        tab_login, tab_signup = st.tabs(["🔐 Sign In", "✨ Create Operator Account"])
+
+        with tab_login:
+            with st.form("void_login_form"):
+                login_user = st.text_input("Operator Username", placeholder="e.g., avyan")
+                login_pw = st.text_input("Security Passkey", type="password", placeholder="Enter password")
+                submit_login = st.form_submit_button("⚡ Authenticate into VOID", use_container_width=True)
+
+                if submit_login:
+                    u_key = login_user.strip().lower()
+                    if u_key in st.session_state.users_db:
+                        user_rec = st.session_state.users_db[u_key]
+                        if user_rec["pw_hash"] == hash_pw(login_pw):
+                            st.session_state.authenticated = True
+                            st.session_state.auth_role = user_rec["role"]
+                            st.session_state.operator_name = user_rec["display_name"]
+                            st.rerun()
+                        else:
+                            st.error("Invalid passkey. Default Founder login is `avyan` / `void2026`.")
+                    else:
+                        st.error("Username not found. Switch to 'Create Operator Account' tab to register.")
+
+        with tab_signup:
+            with st.form("void_signup_form"):
+                new_user = st.text_input("Choose Username", placeholder="e.g., cristiano7")
+                new_display = st.text_input("Display Name / Alias", placeholder="e.g., Cristiano Ronaldo")
+                new_pw = st.text_input("Create Passkey", type="password", placeholder="Minimum 4 characters")
+                submit_signup = st.form_submit_button("🚀 Forge Operator Account", use_container_width=True)
+
+                if submit_signup:
+                    u_clean = new_user.strip().lower()
+                    if len(u_clean) < 2 or len(new_pw) < 4:
+                        st.warning("Username must be at least 2 characters and passkey at least 4 characters.")
+                    elif u_clean in st.session_state.users_db:
+                        st.error("That username is already registered.")
+                    else:
+                        disp = new_display.strip() if new_display.strip() else new_user.strip()
+                        st.session_state.users_db[u_clean] = {
+                            "display_name": disp,
+                            "pw_hash": hash_pw(new_pw),
+                            "role": "Operator",
+                        }
+                        st.session_state.authenticated = True
+                        st.session_state.auth_role = "Operator"
+                        st.session_state.operator_name = disp
+                        st.rerun()
+
+        st.markdown("<div style='text-align:center; margin: 12px 0; color:#64748b; font-size:0.85rem;'>— OR —</div>", unsafe_allow_html=True)
+        if st.button("👤 Continue as Guest Operator", use_container_width=True):
+            st.session_state.authenticated = True
+            st.session_state.auth_role = "Guest"
+            st.session_state.operator_name = "Guest Operator"
+            st.rerun()
+
+    st.markdown(
+        "<div class='void-footer'>⚡ VOID — Sovereign OS Intelligence • Forged by Avyan • Prism OS v4.2.0-Supernova</div>",
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
+
+# ==============================================================================
+# 5. SAFETY GUARDRAIL (Blocks Gore/Bloodshed, Allows All Knowledge)
 # ==============================================================================
 BLOCKED_PATTERNS = [
     r"\b(gore|bloodshed|mutilat|dismember|behead|torture|massacre instructions|how to kill|self-harm|suicide)\b"
@@ -296,7 +439,7 @@ def is_safe_query(query: str) -> tuple[bool, str]:
 
 
 # ==============================================================================
-# 5. SMART QUERY OPTIMIZER & PARALLEL REAL-TIME SEARCH ENGINE
+# 6. SMART QUERY OPTIMIZER & PARALLEL REAL-TIME SEARCH ENGINE
 # ==============================================================================
 STOP_FILLERS = {
     "no", "bro", "hey", "hi", "hello", "please", "tell", "me", "about",
@@ -306,7 +449,6 @@ STOP_FILLERS = {
 
 
 def build_smart_search_query(raw_prompt: str) -> str:
-    """Strips conversational filler so search engines return 100% accurate snippets."""
     cleaned = re.sub(r"[^\w\s]", " ", raw_prompt)
     tokens = [t for t in cleaned.split() if t.lower() not in STOP_FILLERS]
     core_query = " ".join(tokens) if tokens else raw_prompt.strip()
@@ -320,7 +462,6 @@ def build_smart_search_query(raw_prompt: str) -> str:
 
 
 def needs_live_web_search(prompt: str) -> bool:
-    """Skips slow web calls for pure coding/math prompts so coding replies are instant."""
     q_low = prompt.lower().strip()
     pure_code_triggers = [
         "write a python", "write code", "fix this code", "html", "css",
@@ -335,7 +476,6 @@ def needs_live_web_search(prompt: str) -> bool:
 
 @st.cache_data(ttl=180, show_spinner=False)
 def fetch_duckduckgo_snippets(query: str, max_results: int = 6) -> list[str]:
-    """Scrapes full real-time web snippets (dates, schedules, facts) from DuckDuckGo HTML."""
     snippets = []
     try:
         url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
@@ -363,7 +503,6 @@ def fetch_duckduckgo_snippets(query: str, max_results: int = 6) -> list[str]:
 
 @st.cache_data(ttl=180, show_spinner=False)
 def fetch_live_google_news(query: str, max_items: int = 6) -> list[str]:
-    """Fetches real-time Google News RSS headlines & descriptions with smart query."""
     items_out = []
     try:
         url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -384,7 +523,6 @@ def fetch_live_google_news(query: str, max_items: int = 6) -> list[str]:
 
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_live_cricket_rss() -> list[str]:
-    """Fetches live cricket scores from ESPNcricinfo RSS + verified tour schedules."""
     scores = []
     try:
         resp = HTTP_SESSION.get(
@@ -403,7 +541,6 @@ def fetch_live_cricket_rss() -> list[str]:
 
 @st.cache_data(ttl=180, show_spinner=False)
 def fetch_espn_live_scores(league_code: str = "esp.1") -> list[str]:
-    """Fetches real-time football scores from ESPN's open scoreboard API."""
     matches = []
     try:
         url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/scoreboard"
@@ -428,7 +565,6 @@ def fetch_espn_live_scores(league_code: str = "esp.1") -> list[str]:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_live_weather(city: str = "Varanasi") -> str:
-    """Fetches real-time city telemetry from Open-Meteo."""
     try:
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
         geo_r = HTTP_SESSION.get(geo_url, timeout=2.5).json()
@@ -457,7 +593,6 @@ def fetch_live_weather(city: str = "Varanasi") -> str:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_wikipedia_context(query: str) -> str:
-    """Fetches encyclopedic summary from Wikipedia REST API."""
     try:
         params = {
             "action": "query",
@@ -484,7 +619,6 @@ def fetch_wikipedia_context(query: str) -> str:
     return ""
 
 
-# Verified High-Demand Live Sports & World Schedule Index (Oct–Nov 2026)
 VERIFIED_2026_SPORTS_INDEX = """
 VERIFIED OCTOBER–NOVEMBER 2026 SPORTS & EVENTS DATABASE:
 1. INDIA TOUR OF NEW ZEALAND 2026 (Men's Cricket — 5 T20Is, 5 ODIs, 2 Tests):
@@ -501,7 +635,6 @@ VERIFIED OCTOBER–NOVEMBER 2026 SPORTS & EVENTS DATABASE:
 
 
 def gather_parallel_telemetry(user_prompt: str) -> str:
-    """Runs all necessary live web, sports, news, and weather fetches IN PARALLEL (< 1 sec)."""
     now_str = get_ist_now().strftime("%A, %d %B %Y, %I:%M %p IST")
     blocks = [f"CURRENT REAL-TIME CHRONOMETER: {now_str}"]
 
@@ -513,11 +646,9 @@ def gather_parallel_telemetry(user_prompt: str) -> str:
 
     tasks = {}
     with ThreadPoolExecutor(max_workers=6) as executor:
-        # Always run parallel web snippet search + Google news with cleaned query
         tasks["web_snippets"] = executor.submit(fetch_duckduckgo_snippets, smart_q, 6)
         tasks["news"] = executor.submit(fetch_live_google_news, smart_q, 5)
 
-        # Conditional sports/cricket/weather parallel tasks
         if any(w in q_low for w in ["cricket", "ind", "india", "new zealand", "nz", "t20", "odi", "test", "bcci", "icc", "match", "series", "score"]):
             tasks["cricket_rss"] = executor.submit(fetch_live_cricket_rss)
             blocks.append(VERIFIED_2026_SPORTS_INDEX)
@@ -535,7 +666,6 @@ def gather_parallel_telemetry(user_prompt: str) -> str:
         if len(smart_q.split()) <= 5:
             tasks["wiki"] = executor.submit(fetch_wikipedia_context, smart_q)
 
-        # Collect results as they finish
         results = {}
         for key, future in tasks.items():
             try:
@@ -545,22 +675,16 @@ def gather_parallel_telemetry(user_prompt: str) -> str:
 
     if results.get("weather"):
         blocks.append("LIVE WEATHER TELEMETRY:\n" + results["weather"])
-
     if results.get("cricket_rss"):
         blocks.append("LIVE CRICKET FEED:\n" + "\n".join(results["cricket_rss"]))
-
     if results.get("laliga"):
         blocks.append("LIVE LA LIGA SCOREBOARD:\n" + "\n".join(results["laliga"]))
-
     if results.get("epl"):
         blocks.append("LIVE PREMIER LEAGUE SCOREBOARD:\n" + "\n".join(results["epl"]))
-
     if results.get("web_snippets"):
         blocks.append(f"LIVE WEB SEARCH SNIPPETS (Query: '{smart_q}'):\n" + "\n".join(results["web_snippets"]))
-
     if results.get("news"):
         blocks.append("LIVE GOOGLE NEWS HEADLINES:\n" + "\n".join(results["news"]))
-
     if results.get("wiki"):
         blocks.append("WIKIPEDIA REFERENCE:\n" + results["wiki"])
 
@@ -568,7 +692,7 @@ def gather_parallel_telemetry(user_prompt: str) -> str:
 
 
 # ==============================================================================
-# 6. FAST MULTI-ENGINE AI ROUTER (Low Temperature for 100% Factual Accuracy)
+# 7. FAST MULTI-ENGINE AI ROUTER
 # ==============================================================================
 def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
     safe, warning = is_safe_query(user_prompt)
@@ -580,7 +704,7 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
     system_instruction = textwrap.dedent(
         f"""
         You are VOID (Sovereign OS Intelligence — Prism OS v4.2.0-Supernova), an elite, omniscient AI operating system created by Avyan.
-        Current Operator: {st.session_state.operator_name}
+        Current Operator: {st.session_state.operator_name} (Role: {st.session_state.auth_role})
 
         === VERIFIED REAL-TIME WEB & TELEMETRY DATA ===
         {live_context}
@@ -602,7 +726,6 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
     groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
     openrouter_key = st.secrets.get("OPENROUTER_API_KEY", os.getenv("OPENROUTER_API_KEY", ""))
 
-    # 1. Ultra-Fast Groq Engine (if configured)
     if groq_key:
         try:
             r = HTTP_SESSION.post(
@@ -623,7 +746,6 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
         except Exception:
             pass
 
-    # 2. OpenRouter Engine (if configured)
     if openrouter_key:
         try:
             r = HTTP_SESSION.post(
@@ -644,7 +766,6 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
         except Exception:
             pass
 
-    # 3. Zero-Key Pollinations OpenAI-Compatible Endpoint (Low temp for strict facts)
     for model_name in ["openai", "searchgpt"]:
         try:
             r = HTTP_SESSION.post(
@@ -666,14 +787,11 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
         except Exception:
             continue
 
-    return (
-        f"### ⚡ VOID Verified Live Telemetry\n\n"
-        f"{live_context}"
-    )
+    return f"### ⚡ VOID Verified Live Telemetry\n\n{live_context}"
 
 
 # ==============================================================================
-# 7. SIDEBAR NAVIGATION
+# 8. SIDEBAR NAVIGATION (With Prominent Log Out / Switch Account Button)
 # ==============================================================================
 active_session = st.session_state.sessions[st.session_state.current_session]
 
@@ -697,6 +815,16 @@ with st.sidebar:
             "created": get_ist_now().strftime("%H:%M IST"),
         }
         st.session_state.current_session = new_id
+        st.rerun()
+
+    # LOG OUT / SIGN IN BUTTON RIGHT AT THE TOP OF SIDEBAR
+    logout_label = (
+        "🚪 Log Out of Guest / Sign In"
+        if st.session_state.auth_role == "Guest"
+        else f"🚪 Log Out ({st.session_state.operator_name})"
+    )
+    if st.button(logout_label, use_container_width=True):
+        logout_operator()
         st.rerun()
 
     st.session_state.prism_panel = st.toggle(
@@ -725,10 +853,13 @@ with st.sidebar:
     i_col3.metric("Prompts", str(st.session_state.total_prompts))
 
     with st.expander("🧬 Core Identity Vault"):
+        st.caption(f"Current Role: **{st.session_state.auth_role}**")
         new_op = st.text_input("Operator Alias", value=st.session_state.operator_name)
-        if new_op.strip():
+        if new_op.strip() and new_op.strip() != st.session_state.operator_name:
             st.session_state.operator_name = new_op.strip()
-        st.caption("Engine: VOID Omni-Core • Parallel Web Search v4.5")
+        if st.button("🔐 Switch Operator Account", key="vault_logout", use_container_width=True):
+            logout_operator()
+            st.rerun()
 
     with st.expander("👑 Founder Profile"):
         st.markdown(
@@ -738,12 +869,12 @@ with st.sidebar:
         )
 
     st.markdown(
-        f"<div style='margin-top:18px; font-size:0.8rem; color:#64748b;'>Operator: <strong style='color:#cbd5e1;'>{html.escape(st.session_state.operator_name)}</strong></div>",
+        f"<div style='margin-top:14px; font-size:0.8rem; color:#64748b;'>Operator: <strong style='color:#cbd5e1;'>{html.escape(st.session_state.operator_name)}</strong></div>",
         unsafe_allow_html=True,
     )
 
 # ==============================================================================
-# 8. TOP TELEMETRY ROW (4-Column Clean Layout)
+# 9. TOP TELEMETRY ROW
 # ==============================================================================
 ist_now = get_ist_now()
 t_col1, t_col2, t_col3, t_col4 = st.columns(4)
@@ -762,7 +893,7 @@ with t_col4:
     )
 
 # ==============================================================================
-# 9. OPTIONAL PRISM PANEL (Only opens when toggled in Sidebar)
+# 10. OPTIONAL PRISM PANEL
 # ==============================================================================
 if st.session_state.prism_panel:
     with st.container():
@@ -803,7 +934,7 @@ if st.session_state.prism_panel:
         st.markdown("<hr style='border-color:#161f33;'>", unsafe_allow_html=True)
 
 # ==============================================================================
-# 10. SPACIOUS HERO SECTION & 4 QUICK ACTION PILLS
+# 11. SPACIOUS HERO SECTION & 4 QUICK ACTION PILLS
 # ==============================================================================
 triggered_prompt = None
 
@@ -837,7 +968,7 @@ if len(active_session["messages"]) == 0:
     )
 
 # ==============================================================================
-# 11. CHAT HISTORY & HIGH-SPEED EXECUTION
+# 12. CHAT HISTORY & HIGH-SPEED EXECUTION
 # ==============================================================================
 for message in active_session["messages"]:
     with st.chat_message(message["role"]):
