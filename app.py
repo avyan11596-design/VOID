@@ -1,15 +1,62 @@
-import ast import base64 import hashlib import hmac import html import json
-import operator import os import re import secrets as pysecrets import textwrap
-import time import urllib.parse import uuid import xml.etree.ElementTree as ET
-from collections.abc import Mapping from concurrent.futures import
-ThreadPoolExecutor, wait as futures_wait from datetime import datetime,
-timedelta, timezone
+import ast
+import base64
+import hashlib
+import hmac
+import html
+import inspect
+import json
+import operator
+import os
+import re
+import secrets as pysecrets
+import textwrap
+import time
+import urllib.parse
+import uuid
+import xml.etree.ElementTree as ET
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
+from datetime import datetime, timedelta, timezone
 
-import pandas as pd import requests import streamlit as st import
-streamlit.components.v1 as components
+import pandas as pd
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
 
 APP_VERSION = "6.5.0-Apex"
 
+# ============================== 1. BRAND & PAGE CONFIG ==============================
+SVG_RAW = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">'
+    '<defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">'
+    '<stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/>'
+    '</linearGradient></defs>'
+    '<rect width="120" height="120" rx="28" fill="#09090b" stroke="url(#g)" stroke-width="6"/>'
+    '<path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" '
+    'stroke-linecap="round" stroke-linejoin="round"/>'
+    '<circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
+)
+LOGO_B64 = "data:image/svg+xml;base64," + base64.b64encode(SVG_RAW.encode()).decode()
+
+if not os.path.exists("void_logo.svg"):
+    try:
+        with open("void_logo.svg", "w", encoding="utf-8") as f:
+            f.write(SVG_RAW)
+    except OSError:
+        pass
+LOGO_PATH = next((p for p in ("logo.png", "void_logo.svg") if os.path.exists(p)), "⚡")
+
+st.set_page_config(
+    page_title="VOID — Sovereign OS Intelligence",
+    page_icon=LOGO_PATH,
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+try:
+    if LOGO_PATH != "⚡":
+        st.logo(LOGO_PATH)
+except Exception:
+    pass
 ============================== 1. BRAND & PAGE CONFIG ==============================
 
 SVG_RAW = ( '' '' '' '' '' '<path d="M34 38 L60 86 L86 38" fill="none"
