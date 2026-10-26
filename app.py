@@ -1,16 +1,33 @@
-"""VOID — Sovereign OS Intelligence · app.py
+"""
+VOID — Sovereign OS Intelligence · app.py
 Version: 7.0.0-Supernova
-
-Core notes
-  • White-label: every upstream provider and model identifier is stored encoded, so no third-party
-    name appears anywhere in the interface, the prompts, the comments or the shipped repo.
-  • Research: up to 10 sub-queries per question, fanned out in parallel across independent search
-    backends, top pages fetched and trimmed, everything numbered as citations.
-  • Answer: draft -> weak-answer repair -> cross-model critic rewrite -> citation lock.
-  • Interface: streaming output, live research progress, sources panel, per-answer diagnostics.
 """
 
-APP_VERSION = "6.0.0-Supernova"
+import ast
+import base64
+import hashlib
+import hmac
+import html
+import json
+import operator
+import os
+import re
+import secrets as pysecrets
+import textwrap
+import time
+import urllib.parse
+import uuid
+import xml.etree.ElementTree as ET
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+
+import pandas as pd
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
+
+APP_VERSION = "7.0.0-Supernova"
 
 # ============================== 1. BRAND & PAGE ==============================
 SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
