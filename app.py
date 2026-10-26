@@ -1459,7 +1459,22 @@ def stream_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", diag=Non
                 got = True
                 yield chunk
             if got:
-               # ============================== 15. UTILITY & RENDER FUNCTIONS ==============================
+                if diag is not None:
+                    diag.update(
+                        provider=provider,
+                        model=model,
+                        latency=round(time.time() - t0, 2),
+                        link=_PROVIDER_LABEL[provider],
+                    )
+                return
+        except Exception as e:
+            errors.append(f"{model} ({e})")
+            continue
+    if diag is not None:
+        diag["attempts"] = errors[:3]
+    raise EngineError(" • ".join(errors[-2:]) or "All engines failed to stream.")
+
+# ============================== 15. UTILITY & RENDER FUNCTIONS ==============================
 def render_footer():
     st.markdown(
         f'<div class="void-footer">VOID · Sovereign OS Intelligence · Forged by {esc(FOUNDER_NAME)} · v{APP_VERSION}</div>',
