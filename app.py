@@ -40,10 +40,12 @@ except Exception:
 
 # --- MATERIAL SLATE OS THEME & FOOLPROOF READABILITY & INPUT FIXES ---
 st.markdown("""<style>
+/* --- GLOBAL DARK SLATE THEME --- */
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     background-color: #11151c !important;
     color: #f8fafc !important;
 }
+
 [data-testid="stForm"] {
     background: linear-gradient(145deg, #181f2c, #11151c) !important;
     border: 1px solid rgba(59,130,246,.3) !important;
@@ -51,18 +53,21 @@ st.markdown("""<style>
     padding: 24px !important;
     box-shadow: 0 12px 35px rgba(0,0,0,.5) !important;
 }
+
 [data-testid="stToolbarActions"], [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {
     display: none !important;
 }
+
 #MainMenu, footer { visibility: hidden !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
 .block-container { padding-top: 1rem !important; padding-bottom: 5rem !important; max-width: 1420px; }
 section[data-testid="stSidebar"] { background: #0d1117 !important; border-right: 1px solid rgba(59,130,246,.15); }
 
-/* HIGH CONTRAST TEXT GLOBALS */
+/* --- HIGH CONTRAST TEXT GLOBALS --- */
 p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     color: #f8fafc !important;
 }
+
 .stChatMessage {
     border-radius: 16px;
     padding: 18px 22px;
@@ -71,14 +76,17 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     background: rgba(24,31,44,0.98) !important;
     box-shadow: 0 6px 24px rgba(0,0,0,0.4);
 }
+
 .stChatMessage p, .stChatMessage div, .stChatMessage span, .stChatMessage li {
     color: #ffffff !important;
     font-size: 1.03rem !important;
 }
 
 /* ========================================================== */
-/* ABSOLUTE PERMANENT LOCK FOR CHAT INPUT BOX & BOTTOM BAR */
+/* FOOLPROOF UNIVERSAL FIX FOR ALL INPUTS, SEARCH BOXES & CHAT */
 /* ========================================================== */
+
+/* Bottom Bar & Chat Input Container */
 [data-testid="stBottom"],
 [data-testid="stBottom"] > div,
 [data-testid="stBottomBlockContainer"],
@@ -88,30 +96,39 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     border-top: 1px solid rgba(59,130,246,0.2) !important;
 }
 
-[data-testid="stChatInput"],
-[data-testid="stChatInputContainer"],
+/* All BaseWeb Inputs, Text Inputs, Text Areas, and Search Boxes */
+div[data-baseweb="input"],
 div[data-baseweb="base-input"],
-div[data-baseweb="input"] {
+div[data-baseweb="textarea"],
+div[data-baseweb="select"] > div,
+[data-testid="stTextInput"] input,
+[data-testid="stChatInput"],
+[data-testid="stChatInputContainer"] {
     background-color: #161d2a !important;
     background: #161d2a !important;
-    border: 1px solid #3b82f6 !important;
-    border-radius: 16px !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(59,130,246,0.4) !important;
+    border-radius: 12px !important;
 }
 
-[data-testid="stChatInput"] textarea,
+/* Text and cursor color inside inputs */
+input, textarea, select, 
+div[data-baseweb="input"] input, 
 div[data-baseweb="base-input"] input,
-div[data-baseweb="input"] input,
-div[data-baseweb="textarea"] textarea {
+div[data-baseweb="textarea"] textarea,
+[data-testid="stChatInput"] textarea {
     color: #ffffff !important;
     -webkit-text-fill-color: #ffffff !important;
     background-color: transparent !important;
 }
 
-[data-testid="stChatInput"] textarea::placeholder,
-div[data-baseweb="base-input"] input::placeholder,
-div[data-baseweb="input"] input::placeholder {
+/* Placeholder styling */
+input::placeholder,
+textarea::placeholder,
+[data-testid="stChatInput"] textarea::placeholder {
     color: #94a3b8 !important;
     -webkit-text-fill-color: #94a3b8 !important;
+    opacity: 1 !important;
 }
 /* ========================================================== */
 
@@ -124,8 +141,20 @@ div[data-baseweb="input"] input::placeholder {
 .topbar-pill { font-size: .65rem; padding: 3px 10px; border-radius: 99px; background: rgba(59,130,246,0.25); color: #60a5fa; border: 1px solid rgba(59,130,246,.5); font-weight: 700; }
 .void-footer { text-align: center; color: #64748b !important; font-size: .78rem; padding: 26px 0 8px; letter-spacing: .4px; }
 .void-footer span { color: #64748b !important; }
-.stButton button { border-radius: 12px !important; border: 1px solid rgba(148,163,184,.3) !important; background: #1e293b !important; color: #f8fafc !important; transition: all .2s ease !important; font-weight: 600 !important; }
-.stButton button:hover { border-color: #3b82f6 !important; background: #2563eb !important; box-shadow: 0 0 14px rgba(59,130,246,.5) !important; }
+
+.stButton button { 
+    border-radius: 12px !important; 
+    border: 1px solid rgba(148,163,184,.3) !important; 
+    background: #1e293b !important; 
+    color: #f8fafc !important; 
+    transition: all .2s ease !important; 
+    font-weight: 600 !important; 
+}
+.stButton button:hover { 
+    border-color: #3b82f6 !important; 
+    background: #2563eb !important; 
+    box-shadow: 0 0 14px rgba(59,130,246,.5) !important; 
+}
 </style>""", unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
