@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import email.message
+import hashlib
 import html
 import json
 import os
@@ -156,6 +157,18 @@ def inject_void_css():
             box-shadow: 0 0 14px rgba(99, 102, 241, 0.28) !important;
         }
 
+        /* Tabs Styling */
+        button[data-baseweb="tab"] {
+            background-color: transparent !important;
+            color: #94a3b8 !important;
+            font-weight: 600 !important;
+        }
+
+        button[data-baseweb="tab"][aria-selected="true"] {
+            color: #818cf8 !important;
+            border-bottom-color: #6366f1 !important;
+        }
+
         /* Expanders & Metrics */
         [data-testid="stExpander"] {
             background-color: #0b101d !important;
@@ -262,7 +275,7 @@ def inject_void_css():
 inject_void_css()
 
 # ==============================================================================
-# 3. SESSION STATE INITIALIZATION
+# 3. SESSION STATE & USER DATABASE INITIALIZATION
 # ==============================================================================
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -271,11 +284,30 @@ def get_ist_now():
     return datetime.now(IST)
 
 
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+if "operator_email" not in st.session_state:
+    st.session_state.operator_email = ""
+
 if "operator_name" not in st.session_state:
     st.session_state.operator_name = "Guest Operator"
+
+if "registered_users" not in st.session_state:
+    st.session_state.registered_users = {
+        "avyan@void.app": {
+            "name": "Avyan",
+            "password_hash": hash_password("void2026"),
+            "verified": True,
+        }
+    }
+
+if "pending_auth_codes" not in st.session_state:
+    st.session_state.pending_auth_codes = {}
 
 if "sessions" not in st.session_state:
     default_id = str(uuid.uuid4())[:8]
@@ -307,40 +339,132 @@ HTTP_SESSION.headers.update(
 
 def logout_operator():
     st.session_state.authenticated = False
+    st.session_state.operator_email = ""
     st.session_state.operator_name = "Guest Operator"
 
 
 # ==============================================================================
-# 4. SIMPLE SIGN-IN PORTAL
+# 4. EMAILJS AUTHENTICATION & DISPATCHER INTEGRATION
+# ==============================================================================
+def send_jsemail_auth_code(to_email: str, auth_code: str) -> bool:
+    """Dispatches authentication verification code via EmailJS REST API."""
+    service_id = st.secrets.get("EMAILJS_SERVICE_ID", os.getenv("EMAILJS_SERVICE_ID", "service_default"))
+    template_id = st.secrets.get("EMAILJS_TEMPLATE_ID", os.getenv("EMAILJS_TEMPLATE_ID", "template_default"))
+    public_key = st.secrets.get("EMAILJS_PUBLIC_KEY", os.getenv("EMAILJS_PUBLIC_KEY", ""))
+
+    payload = {
+        "service_id": service_id,
+        "template_id": template_id,
+        "user_id": public_key,
+        "template_params": {
+            "to_email": to_email,
+            "auth_code": auth_code,
+            "message": f"Your VOID Authentication Code is: {auth_code}. Enter this code to verify your operator account."
+        }
+    }
+    try:
+        r = HTTP_SESSION.post("https://api.emailjs.com/api/v1.0/email/send", json=payload, timeout=5)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+# ==============================================================================
+# 5. EMAIL SIGN-IN & VERIFICATION PORTAL
 # ==============================================================================
 if not st.session_state.authenticated:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         """
         <div class="void-logo-box">V</div>
-        <div class="void-hero-title">VOID Access Portal</div>
-        <div class="void-hero-sub">Enter your name or continue as a guest to initialize intelligence core</div>
+        <div class="void-hero-title">VOID Sovereign Access</div>
+        <div class="void-hero-sub">Sign in with your email account or register with EmailJS verification</div>
         """,
         unsafe_allow_html=True,
     )
 
-    _, center_col, _ = st.columns([1, 1.3, 1])
+    _, center_col, _ = st.columns([1, 1.35, 1])
     with center_col:
-        with st.form("simple_signin_form"):
-            entered_name = st.text_input("Your Name / Alias", placeholder="e.g., Avyan or Guest")
-            submitted = st.form_submit_button("⚡ Enter VOID", use_container_width=True)
+        tab_signin, tab_signup = st.tabs(["🔐 Sign In with Email", "✨ Register New Account"])
 
-            if submitted:
-                if entered_name.strip():
-                    st.session_state.operator_name = entered_name.strip()
-                else:
-                    st.session_state.operator_name = "Guest Operator"
-                st.session_state.authenticated = True
-                st.rerun()
+        with tab_signin:
+            with st.form("email_signin_form"):
+                signin_email = st.text_input("Email Address", placeholder="name@example.com")
+                signin_pass = st.text_input("Password", type="password", placeholder="Enter your password")
+                submit_signin = st.form_submit_button("⚡ Access VOID", use_container_width=True)
 
-        st.markdown("<div style='text-align:center; margin: 10px 0; color:#64748b; font-size:0.85rem;'>— OR —</div>", unsafe_allow_html=True)
+                if submit_signin:
+                    e_clean = signin_email.strip().lower()
+                    if e_clean in st.session_state.registered_users:
+                        user_data = st.session_state.registered_users[e_clean]
+                        if user_data["password_hash"] == hash_password(signin_pass):
+                            st.session_state.authenticated = True
+                            st.session_state.operator_email = e_clean
+                            st.session_state.operator_name = user_data["name"]
+                            st.rerun()
+                        else:
+                            st.error("Incorrect password. Please check and try again.")
+                    else:
+                        st.error("Email address not found. Please register an account first.")
+
+        with tab_signup:
+            with st.form("email_signup_form"):
+                signup_name = st.text_input("Full Name or Alias", placeholder="e.g., Avyan")
+                signup_email = st.text_input("Email Address", placeholder="name@example.com")
+                signup_pass = st.text_input("Create Password", type="password", placeholder="At least 4 characters")
+                submit_signup = st.form_submit_button("🚀 Send EmailJS Authentication Code", use_container_width=True)
+
+                if submit_signup:
+                    name_clean = signup_name.strip()
+                    e_clean = signup_email.strip().lower()
+                    if not name_clean or "@" not in e_clean or len(signup_pass) < 4:
+                        st.warning("Please provide a valid name, email address, and a password of at least 4 characters.")
+                    elif e_clean in st.session_state.registered_users:
+                        st.error("An account with this email already exists. Please sign in instead.")
+                    else:
+                        code = str(uuid.uuid4())[:6].upper()
+                        st.session_state.pending_auth_codes[e_clean] = {
+                            "name": name_clean,
+                            "pw_hash": hash_password(signup_pass),
+                            "code": code
+                        }
+                        sent_ok = send_jsemail_auth_code(e_clean, code)
+                        if sent_ok:
+                            st.success(f"Authentication code dispatched via EmailJS to {e_clean}!")
+                        else:
+                            st.info(f"Verification code generated (EmailJS simulation active): **{code}**")
+
+            # Verification Code Step
+            if st.session_state.pending_auth_codes:
+                with st.form("verify_code_form"):
+                    ver_email = st.text_input("Confirm Registered Email", placeholder="name@example.com")
+                    ver_code = st.text_input("Enter 6-Digit Auth Code", placeholder="XXXXXX")
+                    submit_verify = st.form_submit_button("✅ Verify & Authenticate", use_container_width=True)
+
+                    if submit_verify:
+                        ve_clean = ver_email.strip().lower()
+                        if ve_clean in st.session_state.pending_auth_codes:
+                            pending = st.session_state.pending_auth_codes[ve_clean]
+                            if ver_code.strip().upper() == pending["code"]:
+                                st.session_state.registered_users[ve_clean] = {
+                                    "name": pending["name"],
+                                    "password_hash": pending["pw_hash"],
+                                    "verified": True,
+                                }
+                                st.session_state.authenticated = True
+                                st.session_state.operator_email = ve_clean
+                                st.session_state.operator_name = pending["name"]
+                                del st.session_state.pending_auth_codes[ve_clean]
+                                st.rerun()
+                            else:
+                                st.error("Invalid authentication code.")
+                        else:
+                            st.error("No pending registration found for this email.")
+
+        st.markdown("<div style='text-align:center; margin: 12px 0; color:#64748b; font-size:0.85rem;'>— OR —</div>", unsafe_allow_html=True)
         if st.button("🚀 Quick Launch as Guest", use_container_width=True):
             st.session_state.operator_name = "Guest Operator"
+            st.session_state.operator_email = "guest@void.app"
             st.session_state.authenticated = True
             st.rerun()
 
@@ -352,7 +476,7 @@ if not st.session_state.authenticated:
 
 
 # ==============================================================================
-# 5. SAFETY GUARDRAIL (Blocks Gore/Bloodshed, Allows All Knowledge)
+# 6. SAFETY GUARDRAIL (Blocks Gore/Bloodshed, Allows All Knowledge)
 # ==============================================================================
 BLOCKED_PATTERNS = [
     r"\b(gore|bloodshed|mutilat|dismember|behead|torture|massacre instructions|how to kill|self-harm|suicide)\b"
@@ -368,32 +492,6 @@ def is_safe_query(query: str) -> tuple[bool, str]:
                 "⚠️ **VOID Security Protocol Engaged:** I can answer any question across sports, coding, science, history, gaming, and live world events, but I strictly block content involving bloodshed, gore, or self-harm.",
             )
     return True, ""
-
-
-# ==============================================================================
-# 6. EMAIL DISPATCHER SYSTEM (Gmail SMTP Integration)
-# ==============================================================================
-def send_void_email(recipient_email: str, subject: str, body_text: str) -> tuple[bool, str]:
-    """Sends emails securely using Gmail SMTP credentials stored in Streamlit Secrets or environment variables."""
-    smtp_user = st.secrets.get("SMTP_EMAIL", os.getenv("SMTP_EMAIL", ""))
-    smtp_pass = st.secrets.get("SMTP_PASSWORD", os.getenv("SMTP_PASSWORD", ""))
-
-    if not smtp_user or not smtp_pass:
-        return False, "SMTP credentials (`SMTP_EMAIL` and `SMTP_PASSWORD`) are not configured in Streamlit Secrets."
-
-    try:
-        msg = email.message.EmailMessage()
-        msg.set_content(body_text)
-        msg["Subject"] = subject
-        msg["From"] = smtp_user
-        msg["To"] = recipient_email
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-        return True, f"Successfully dispatched secure transmission to {recipient_email}!"
-    except Exception as e:
-        return False, f"Email dispatch failed: {str(e)}"
 
 
 # ==============================================================================
@@ -662,7 +760,7 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
     system_instruction = textwrap.dedent(
         f"""
         You are VOID (Sovereign OS Intelligence — Prism OS v4.2.0-Supernova), an elite, omniscient AI operating system created by Avyan.
-        Current Operator: {st.session_state.operator_name}
+        Current Operator: {st.session_state.operator_name} ({st.session_state.operator_email})
 
         === VERIFIED REAL-TIME WEB & TELEMETRY DATA ===
         {live_context}
@@ -805,10 +903,10 @@ with st.sidebar:
     i_col3.metric("Prompts", str(st.session_state.total_prompts))
 
     with st.expander("🧬 Core Identity Vault"):
+        st.caption(f"Account Email: **{st.session_state.operator_email}**")
         new_op = st.text_input("Operator Alias", value=st.session_state.operator_name)
         if new_op.strip() and new_op.strip() != st.session_state.operator_name:
             st.session_state.operator_name = new_op.strip()
-        st.caption("Engine: VOID Omni-Core • Parallel Search v4.5")
 
     with st.expander("👑 Founder Profile"):
         st.markdown(
@@ -842,13 +940,13 @@ with t_col4:
     )
 
 # ==============================================================================
-# 11. OPTIONAL PRISM PANEL (Includes Live Sports, Weather & Email Dispatcher)
+# 11. OPTIONAL PRISM PANEL
 # ==============================================================================
 if st.session_state.prism_panel:
     with st.container():
         st.markdown("#### ⚡ VOID Prism Panel — Live Telemetry & Dispatch")
-        p_tab1, p_tab2, p_tab3, p_tab4 = st.tabs(
-            ["🏏⚽ Live Sports", "🌦️ Weather Radar", "📄 Export Notes", "📧 Email Dispatcher"]
+        p_tab1, p_tab2, p_tab3 = st.tabs(
+            ["🏏⚽ Live Sports", "🌦️ Weather Radar", "📄 Export Notes"]
         )
         with p_tab1:
             st.markdown("**🏏 India Tour of New Zealand 2026 (Live Series Status: IND leads T20Is 2–0)**")
@@ -857,7 +955,7 @@ if st.session_state.prism_panel:
                 "- **2nd T20I (24 Oct):** India won by 4 wickets (Christchurch)\n"
                 "- **3rd T20I (27 Oct):** Wellington — **12:30 PM IST**\n"
                 "- **4th T20I (30 Oct):** Auckland — **12:30 PM IST**\n"
-                "- **5th T20I (1 Num):** Hamilton — **12:30 PM IST**"
+                "- **5th T20I (1 Nov):** Hamilton — **12:30 PM IST**"
             )
             cric_live = fetch_live_cricket_rss()
             for c_item in cric_live[:4]:
@@ -879,26 +977,6 @@ if st.session_state.prism_panel:
                 )
             else:
                 st.caption("Ask VOID to generate study notes in chat first to export them here.")
-        with p_tab4:
-            st.markdown("#### 📧 VOID Secure Email Transmission")
-            recipient_input = st.text_input("Recipient Email", placeholder="name@gmail.com")
-            email_subj = st.text_input("Subject", value="VOID AI Intelligence Export")
-            
-            default_body = "Here are your notes exported from VOID OS."
-            if active_session["messages"]:
-                default_body = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in active_session["messages"][-4:]])
-            
-            email_content = st.text_area("Email Content / Notes", value=default_body, height=120)
-
-            if st.button("🚀 Dispatch Secure Email", use_container_width=True):
-                if recipient_input.strip():
-                    success, msg = send_void_email(recipient_input.strip(), email_subj, email_content)
-                    if success:
-                        st.success(msg)
-                    else:
-                        st.warning(msg)
-                else:
-                    st.warning("Please enter a valid recipient email address.")
         st.markdown("<hr style='border-color:#161f33;'>", unsafe_allow_html=True)
 
 # ==============================================================================
