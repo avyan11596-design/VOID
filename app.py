@@ -1,6 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-import hashlib
 import html
 import json
 import os
@@ -25,7 +24,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# 2. PERMANENT DARK-THEME & READABILITY CSS LOCK (Inputs, Login, Chat & Buttons)
+# 2. PERMANENT DARK-THEME & READABILITY CSS LOCK
 # ==============================================================================
 def inject_void_css():
     st.markdown(
@@ -83,7 +82,7 @@ def inject_void_css():
             box-shadow: 0 0 25px rgba(99, 102, 241, 0.32) !important;
         }
 
-        /* Lock ALL Text Inputs, Password Boxes & Textareas (Login + Sidebar + Chat) */
+        /* Lock ALL Text Inputs & Textareas */
         div[data-baseweb="input"],
         div[data-baseweb="base-input"],
         div[data-baseweb="textarea"] {
@@ -112,7 +111,7 @@ def inject_void_css():
             opacity: 1 !important;
         }
 
-        /* Form Container Styling (For Login Portal) */
+        /* Form Container Styling */
         [data-testid="stForm"] {
             background-color: #0b101d !important;
             border: 1px solid #1e293b !important;
@@ -155,18 +154,6 @@ def inject_void_css():
             box-shadow: 0 0 14px rgba(99, 102, 241, 0.28) !important;
         }
 
-        /* Tabs Styling */
-        button[data-baseweb="tab"] {
-            background-color: transparent !important;
-            color: #94a3b8 !important;
-            font-weight: 600 !important;
-        }
-
-        button[data-baseweb="tab"][aria-selected="true"] {
-            color: #818cf8 !important;
-            border-bottom-color: #6366f1 !important;
-        }
-
         /* Expanders & Metrics */
         [data-testid="stExpander"] {
             background-color: #0b101d !important;
@@ -197,7 +184,7 @@ def inject_void_css():
             font-weight: 700 !important;
         }
 
-        /* Chat Messages & Tables */
+        /* Chat Messages */
         [data-testid="stChatMessage"] {
             background-color: #0b111e !important;
             border: 1px solid #172236 !important;
@@ -273,7 +260,7 @@ def inject_void_css():
 inject_void_css()
 
 # ==============================================================================
-# 3. SESSION STATE & AUTHENTICATION INITIALIZATION
+# 3. SESSION STATE INITIALIZATION
 # ==============================================================================
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -282,27 +269,8 @@ def get_ist_now():
     return datetime.now(IST)
 
 
-def hash_pw(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
-
-
-if "users_db" not in st.session_state:
-    founder_default_pw = st.secrets.get("FOUNDER_PASSWORD", "void2026")
-    st.session_state.users_db = {
-        "avyan": {
-            "display_name": "Avyan (Founder)",
-            "pw_hash": hash_pw(founder_default_pw),
-            "role": "Founder",
-        }
-    }
-
 if "authenticated" not in st.session_state:
-    # Starts in Guest Mode so Google crawlers & instant visitors can view the app,
-    # and clicking "Log Out" in the sidebar opens the full Login / Sign-Up Portal.
-    st.session_state.authenticated = True
-
-if "auth_role" not in st.session_state:
-    st.session_state.auth_role = "Guest"
+    st.session_state.authenticated = False
 
 if "operator_name" not in st.session_state:
     st.session_state.operator_name = "Guest Operator"
@@ -336,80 +304,42 @@ HTTP_SESSION.headers.update(
 
 
 def logout_operator():
-    """Logs out of Guest or Operator mode and opens the Login Portal."""
     st.session_state.authenticated = False
-    st.session_state.auth_role = "LoggedOut"
-    st.session_state.operator_name = "None"
+    st.session_state.operator_name = "Guest Operator"
 
 
 # ==============================================================================
-# 4. SOVEREIGN LOGIN & REGISTRATION PORTAL (Shown when Logged Out)
+# 4. SIMPLE & CLEAN SIGN-IN / WELCOME SCREEN
 # ==============================================================================
 if not st.session_state.authenticated:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         """
         <div class="void-logo-box">V</div>
-        <div class="void-hero-title">VOID Sovereign Access</div>
-        <div class="void-hero-sub">Sign in as Founder / Operator, create a new account, or continue as Guest</div>
+        <div class="void-hero-title">VOID Access Portal</div>
+        <div class="void-hero-sub">Enter your name or continue as a guest to initialize intelligence core</div>
         """,
         unsafe_allow_html=True,
     )
 
-    _, center_col, _ = st.columns([1, 1.35, 1])
+    _, center_col, _ = st.columns([1, 1.3, 1])
     with center_col:
-        tab_login, tab_signup = st.tabs(["🔐 Sign In", "✨ Create Operator Account"])
+        with st.form("simple_signin_form"):
+            entered_name = st.text_input("Your Name / Alias", placeholder="e.g., Avyan or Guest")
+            submitted = st.form_submit_button("⚡ Enter VOID", use_container_width=True)
 
-        with tab_login:
-            with st.form("void_login_form"):
-                login_user = st.text_input("Operator Username", placeholder="e.g., avyan")
-                login_pw = st.text_input("Security Passkey", type="password", placeholder="Enter password")
-                submit_login = st.form_submit_button("⚡ Authenticate into VOID", use_container_width=True)
+            if submitted:
+                if entered_name.strip():
+                    st.session_state.operator_name = entered_name.strip()
+                else:
+                    st.session_state.operator_name = "Guest Operator"
+                st.session_state.authenticated = True
+                st.rerun()
 
-                if submit_login:
-                    u_key = login_user.strip().lower()
-                    if u_key in st.session_state.users_db:
-                        user_rec = st.session_state.users_db[u_key]
-                        if user_rec["pw_hash"] == hash_pw(login_pw):
-                            st.session_state.authenticated = True
-                            st.session_state.auth_role = user_rec["role"]
-                            st.session_state.operator_name = user_rec["display_name"]
-                            st.rerun()
-                        else:
-                            st.error("Invalid passkey. Default Founder login is `avyan` / `void2026`.")
-                    else:
-                        st.error("Username not found. Switch to 'Create Operator Account' tab to register.")
-
-        with tab_signup:
-            with st.form("void_signup_form"):
-                new_user = st.text_input("Choose Username", placeholder="e.g., cristiano7")
-                new_display = st.text_input("Display Name / Alias", placeholder="e.g., Cristiano Ronaldo")
-                new_pw = st.text_input("Create Passkey", type="password", placeholder="Minimum 4 characters")
-                submit_signup = st.form_submit_button("🚀 Forge Operator Account", use_container_width=True)
-
-                if submit_signup:
-                    u_clean = new_user.strip().lower()
-                    if len(u_clean) < 2 or len(new_pw) < 4:
-                        st.warning("Username must be at least 2 characters and passkey at least 4 characters.")
-                    elif u_clean in st.session_state.users_db:
-                        st.error("That username is already registered.")
-                    else:
-                        disp = new_display.strip() if new_display.strip() else new_user.strip()
-                        st.session_state.users_db[u_clean] = {
-                            "display_name": disp,
-                            "pw_hash": hash_pw(new_pw),
-                            "role": "Operator",
-                        }
-                        st.session_state.authenticated = True
-                        st.session_state.auth_role = "Operator"
-                        st.session_state.operator_name = disp
-                        st.rerun()
-
-        st.markdown("<div style='text-align:center; margin: 12px 0; color:#64748b; font-size:0.85rem;'>— OR —</div>", unsafe_allow_html=True)
-        if st.button("👤 Continue as Guest Operator", use_container_width=True):
-            st.session_state.authenticated = True
-            st.session_state.auth_role = "Guest"
+        st.markdown("<div style='text-align:center; margin: 10px 0; color:#64748b; font-size:0.85rem;'>— OR —</div>", unsafe_allow_html=True)
+        if st.button("🚀 Quick Launch as Guest", use_container_width=True):
             st.session_state.operator_name = "Guest Operator"
+            st.session_state.authenticated = True
             st.rerun()
 
     st.markdown(
@@ -704,7 +634,7 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
     system_instruction = textwrap.dedent(
         f"""
         You are VOID (Sovereign OS Intelligence — Prism OS v4.2.0-Supernova), an elite, omniscient AI operating system created by Avyan.
-        Current Operator: {st.session_state.operator_name} (Role: {st.session_state.auth_role})
+        Current Operator: {st.session_state.operator_name}
 
         === VERIFIED REAL-TIME WEB & TELEMETRY DATA ===
         {live_context}
@@ -791,7 +721,7 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
 
 
 # ==============================================================================
-# 8. SIDEBAR NAVIGATION (With Prominent Log Out / Switch Account Button)
+# 8. SIDEBAR NAVIGATION
 # ==============================================================================
 active_session = st.session_state.sessions[st.session_state.current_session]
 
@@ -817,13 +747,7 @@ with st.sidebar:
         st.session_state.current_session = new_id
         st.rerun()
 
-    # LOG OUT / SIGN IN BUTTON RIGHT AT THE TOP OF SIDEBAR
-    logout_label = (
-        "🚪 Log Out of Guest / Sign In"
-        if st.session_state.auth_role == "Guest"
-        else f"🚪 Log Out ({st.session_state.operator_name})"
-    )
-    if st.button(logout_label, use_container_width=True):
+    if st.button(f"🚪 Sign Out ({st.session_state.operator_name})", use_container_width=True):
         logout_operator()
         st.rerun()
 
@@ -853,13 +777,10 @@ with st.sidebar:
     i_col3.metric("Prompts", str(st.session_state.total_prompts))
 
     with st.expander("🧬 Core Identity Vault"):
-        st.caption(f"Current Role: **{st.session_state.auth_role}**")
         new_op = st.text_input("Operator Alias", value=st.session_state.operator_name)
         if new_op.strip() and new_op.strip() != st.session_state.operator_name:
             st.session_state.operator_name = new_op.strip()
-        if st.button("🔐 Switch Operator Account", key="vault_logout", use_container_width=True):
-            logout_operator()
-            st.rerun()
+        st.caption("Engine: VOID Omni-Core • Parallel Search v4.5")
 
     with st.expander("👑 Founder Profile"):
         st.markdown(
