@@ -77,21 +77,18 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
 }
 
 /* ========================================================== */
-/* ABSOLUTE PERMANENT FIX FOR CHAT INPUT BOX & WHITE BACKGROUND */
+/* FOOLPROOF SLATE LOCK FOR STREAMLIT CHAT INPUT CONTAINER */
 /* ========================================================== */
 [data-testid="stBottom"],
 [data-testid="stBottom"] > div,
 [data-testid="stBottomBlockContainer"],
-.stChatFloatingInputContainer {
+.stChatFloatingInputContainer,
+[data-testid="stChatInputContainer"] {
     background-color: #11151c !important;
-    background-image: none !important;
-    border-top: 1px solid rgba(59,130,246,0.2) !important;
+    background: #11151c !important;
 }
 
-[data-testid="stChatInput"],
-[data-testid="stChatInputContainer"],
-div[data-baseweb="base-input"],
-div[data-baseweb="input"] {
+[data-testid="stChatInput"] {
     background-color: #161d2a !important;
     background: #161d2a !important;
     border: 1px solid #3b82f6 !important;
@@ -107,9 +104,7 @@ div[data-baseweb="textarea"] textarea {
     background-color: transparent !important;
 }
 
-[data-testid="stChatInput"] textarea::placeholder,
-div[data-baseweb="base-input"] input::placeholder,
-div[data-baseweb="input"] input::placeholder {
+[data-testid="stChatInput"] textarea::placeholder {
     color: #94a3b8 !important;
     -webkit-text-fill-color: #94a3b8 !important;
 }
@@ -126,7 +121,19 @@ div[data-baseweb="input"] input::placeholder {
 .void-footer span { color: #64748b !important; }
 .stButton button { border-radius: 12px !important; border: 1px solid rgba(148,163,184,.3) !important; background: #1e293b !important; color: #f8fafc !important; transition: all .2s ease !important; font-weight: 600 !important; }
 .stButton button:hover { border-color: #3b82f6 !important; background: #2563eb !important; box-shadow: 0 0 14px rgba(59,130,246,.5) !important; }
-</style>""", unsafe_allow_html=True)
+</style>
+
+<script>
+// Forces the bottom bar to stay dark even if Streamlit tries to inject inline white styles
+const observer = new MutationObserver(() => {
+    document.querySelectorAll('[data-testid="stBottom"], [data-testid="stBottomBlockContainer"], .stChatFloatingInputContainer').forEach(el => {
+        el.style.backgroundColor = '#11151c';
+        el.style.backgroundImage = 'none';
+    });
+});
+observer.observe(document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
