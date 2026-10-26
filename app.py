@@ -76,7 +76,9 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     font-size: 1.03rem !important;
 }
 
-/* ABSOLUTE FIX FOR CHAT INPUT & TEXT BOXES (No White Backgrounds) */
+/* ========================================================== */
+/* ABSOLUTE PERMANENT FIX FOR CHAT INPUT BOX & WHITE BACKGROUND */
+/* ========================================================== */
 [data-testid="stBottom"],
 [data-testid="stBottom"] > div,
 [data-testid="stBottomBlockContainer"],
@@ -86,25 +88,32 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     border-top: 1px solid rgba(59,130,246,0.2) !important;
 }
 
-[data-testid="stChatInput"] {
+[data-testid="stChatInput"],
+[data-testid="stChatInputContainer"],
+div[data-baseweb="base-input"],
+div[data-baseweb="input"] {
     background-color: #161d2a !important;
+    background: #161d2a !important;
     border: 1px solid #3b82f6 !important;
     border-radius: 16px !important;
 }
-[data-testid="stChatInput"] textarea {
+
+[data-testid="stChatInput"] textarea,
+div[data-baseweb="base-input"] input,
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea {
     color: #ffffff !important;
     -webkit-text-fill-color: #ffffff !important;
     background-color: transparent !important;
 }
-[data-testid="stChatInput"] textarea::placeholder {
+
+[data-testid="stChatInput"] textarea::placeholder,
+div[data-baseweb="base-input"] input::placeholder,
+div[data-baseweb="input"] input::placeholder {
     color: #94a3b8 !important;
     -webkit-text-fill-color: #94a3b8 !important;
 }
-div[data-baseweb="input"] input, div[data-baseweb="textarea"] textarea {
-    background-color: #161d2a !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-}
+/* ========================================================== */
 
 .prism-card { background: #161d2a; border: 1px solid rgba(59,130,246,.35); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
 .void-hero { text-align: center; padding: 28px 10px 20px; }
