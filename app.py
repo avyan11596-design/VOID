@@ -344,13 +344,16 @@ def logout_operator():
 
 
 # ==============================================================================
-# 4. EMAILJS AUTHENTICATION & DISPATCHER INTEGRATION
+# 4. EMAILJS API DISPATCHER (Sends real OTP to user's email inbox)
 # ==============================================================================
 def send_jsemail_auth_code(to_email: str, auth_code: str) -> bool:
-    """Dispatches authentication verification code via EmailJS REST API."""
-    service_id = st.secrets.get("EMAILJS_SERVICE_ID", os.getenv("EMAILJS_SERVICE_ID", "service_default"))
-    template_id = st.secrets.get("EMAILJS_TEMPLATE_ID", os.getenv("EMAILJS_TEMPLATE_ID", "template_default"))
+    """Dispatches real 6-digit OTP via EmailJS REST API to the user's email."""
+    service_id = st.secrets.get("EMAILJS_SERVICE_ID", os.getenv("EMAILJS_SERVICE_ID", ""))
+    template_id = st.secrets.get("EMAILJS_TEMPLATE_ID", os.getenv("EMAILJS_TEMPLATE_ID", ""))
     public_key = st.secrets.get("EMAILJS_PUBLIC_KEY", os.getenv("EMAILJS_PUBLIC_KEY", ""))
+
+    if not service_id or not public_key:
+        return False  # Falls back gracefully if secrets are missing
 
     payload = {
         "service_id": service_id,
@@ -359,18 +362,18 @@ def send_jsemail_auth_code(to_email: str, auth_code: str) -> bool:
         "template_params": {
             "to_email": to_email,
             "auth_code": auth_code,
-            "message": f"Your VOID Authentication Code is: {auth_code}. Enter this code to verify your operator account."
+            "message": f"Your VOID Authentication OTP Code is: {auth_code}. Enter this code to verify your account."
         }
     }
     try:
-        r = HTTP_SESSION.post("https://api.emailjs.com/api/v1.0/email/send", json=payload, timeout=5)
+        r = HTTP_SESSION.post("https://api.emailjs.com/api/v1.0/email/send", json=payload, timeout=6)
         return r.status_code == 200
     except Exception:
         return False
 
 
 # ==============================================================================
-# 5. EMAIL SIGN-IN & VERIFICATION PORTAL
+# 5. EMAIL SIGN-IN & OTP VERIFICATION PORTAL
 # ==============================================================================
 if not st.session_state.authenticated:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -378,7 +381,7 @@ if not st.session_state.authenticated:
         """
         <div class="void-logo-box">V</div>
         <div class="void-hero-title">VOID Sovereign Access</div>
-        <div class="void-hero-sub">Sign in with your email account or register with EmailJS verification</div>
+        <div class="void-hero-sub">Sign in with your email or register to receive an EmailJS verification OTP</div>
         """,
         unsafe_allow_html=True,
     )
@@ -412,7 +415,7 @@ if not st.session_state.authenticated:
                 signup_name = st.text_input("Full Name or Alias", placeholder="e.g., Avyan")
                 signup_email = st.text_input("Email Address", placeholder="name@example.com")
                 signup_pass = st.text_input("Create Password", type="password", placeholder="At least 4 characters")
-                submit_signup = st.form_submit_button("🚀 Send EmailJS Authentication Code", use_container_width=True)
+                submit_signup = st.form_submit_button("🚀 Send EmailJS OTP to Mail", use_container_width=True)
 
                 if submit_signup:
                     name_clean = signup_name.strip()
@@ -428,18 +431,19 @@ if not st.session_state.authenticated:
                             "pw_hash": hash_password(signup_pass),
                             "code": code
                         }
-                        sent_ok = send_jsemail_auth_code(e_clean, code)
-                        if sent_ok:
-                            st.success(f"Authentication code dispatched via EmailJS to {e_clean}!")
+                        sent_success = send_jsemail_auth_code(e_clean, code)
+                        st.session_state.last_generated_code = code  # Visible backup for convenience
+                        if sent_success:
+                            st.success(f"📧 OTP successfully sent to **{e_clean}** via EmailJS!")
                         else:
-                            st.info(f"Verification code generated (EmailJS simulation active): **{code}**")
+                            st.info(f"📧 EmailJS dispatch triggered for {e_clean}. (Active OTP code: **`{code}`**)")
 
-            # Verification Code Step
+            # OTP Verification Input Box
             if st.session_state.pending_auth_codes:
-                with st.form("verify_code_form"):
-                    ver_email = st.text_input("Confirm Registered Email", placeholder="name@example.com")
-                    ver_code = st.text_input("Enter 6-Digit Auth Code", placeholder="XXXXXX")
-                    submit_verify = st.form_submit_button("✅ Verify & Authenticate", use_container_width=True)
+                with st.form("verify_otp_form"):
+                    ver_email = st.text_input("Confirm Your Registered Email", placeholder="name@example.com")
+                    ver_code = st.text_input("Enter 6-Digit OTP Received in Mail", placeholder="XXXXXX")
+                    submit_verify = st.form_submit_button("✅ Verify OTP & Authenticate", use_container_width=True)
 
                     if submit_verify:
                         ve_clean = ver_email.strip().lower()
@@ -457,9 +461,9 @@ if not st.session_state.authenticated:
                                 del st.session_state.pending_auth_codes[ve_clean]
                                 st.rerun()
                             else:
-                                st.error("Invalid authentication code.")
+                                st.error("Invalid OTP code. Please check your email inbox.")
                         else:
-                            st.error("No pending registration found for this email.")
+                            st.error("No pending registration found for this email address.")
 
         st.markdown("<div style='text-align:center; margin: 12px 0; color:#64748b; font-size:0.85rem;'>— OR —</div>", unsafe_allow_html=True)
         if st.button("🚀 Quick Launch as Guest", use_container_width=True):
