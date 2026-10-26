@@ -1112,7 +1112,7 @@ elif ui_mode == "🛰️ Ship Telemetry & Insights":
 
     st.markdown("##### 🔥 Daily Engine Load (last 30 days)")
     today = datetime.now().date()
-    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d"] for i in range(29, -1, -1)]
+    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
     series = pd.Series([db.get("usage", {}).get(d, 0) for d in days], index=[d[5:] for d in days])
     if series.sum() > 0:
         st.area_chart(series, height=260)
