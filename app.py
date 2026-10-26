@@ -1,13 +1,16 @@
+import ast
 import base64
 import hashlib
 import hmac
 import html
 import json
+import operator
 import os
 import re
 import secrets as pysecrets
 import textwrap
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -16,7 +19,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "4.2.0-Supernova"
+APP_VERSION = "5.0.0-Supernova"
 
 # ============================== 1. BRAND & PAGE ==============================
 SVG_RAW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="#11151c" stroke="url(#g)" stroke-width="6"/><path d="M34 38 L60 86 L86 38" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/><circle cx="60" cy="34" r="7" fill="#ffffff"/></svg>'
@@ -31,7 +34,7 @@ if not os.path.exists("void_logo.svg"):
 LOGO_PATH = next((p for p in ("logo.png", "void_logo.svg") if os.path.exists(p)), "⚡")
 
 st.set_page_config(page_title="VOID — Sovereign OS Intelligence",
-                    page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
+                   page_icon=LOGO_PATH, layout="wide", initial_sidebar_state="expanded")
 try:
     if LOGO_PATH != "⚡":
         st.logo(LOGO_PATH)
@@ -40,12 +43,10 @@ except Exception:
 
 # --- MATERIAL SLATE OS THEME & FOOLPROOF READABILITY & INPUT FIXES ---
 st.markdown("""<style>
-/* --- GLOBAL DARK SLATE THEME --- */
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     background-color: #11151c !important;
     color: #f8fafc !important;
 }
-
 [data-testid="stForm"] {
     background: linear-gradient(145deg, #181f2c, #11151c) !important;
     border: 1px solid rgba(59,130,246,.3) !important;
@@ -53,21 +54,18 @@ st.markdown("""<style>
     padding: 24px !important;
     box-shadow: 0 12px 35px rgba(0,0,0,.5) !important;
 }
-
 [data-testid="stToolbarActions"], [data-testid="stAppDeployButton"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {
     display: none !important;
 }
-
 #MainMenu, footer { visibility: hidden !important; }
 header[data-testid="stHeader"] { background: transparent !important; }
 .block-container { padding-top: 1rem !important; padding-bottom: 5rem !important; max-width: 1420px; }
 section[data-testid="stSidebar"] { background: #0d1117 !important; border-right: 1px solid rgba(59,130,246,.15); }
 
-/* --- HIGH CONTRAST TEXT GLOBALS --- */
+/* HIGH CONTRAST TEXT GLOBALS */
 p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     color: #f8fafc !important;
 }
-
 .stChatMessage {
     border-radius: 16px;
     padding: 18px 22px;
@@ -76,17 +74,12 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     background: rgba(24,31,44,0.98) !important;
     box-shadow: 0 6px 24px rgba(0,0,0,0.4);
 }
-
 .stChatMessage p, .stChatMessage div, .stChatMessage span, .stChatMessage li {
     color: #ffffff !important;
     font-size: 1.03rem !important;
 }
 
-/* ========================================================== */
-/* FOOLPROOF UNIVERSAL FIX FOR ALL INPUTS, SEARCH BOXES & CHAT */
-/* ========================================================== */
-
-/* Bottom Bar & Chat Input Container */
+/* ABSOLUTE PERMANENT LOCK FOR CHAT INPUT, SEARCH BOX & BOTTOM BAR */
 [data-testid="stBottom"],
 [data-testid="stBottom"] > div,
 [data-testid="stBottomBlockContainer"],
@@ -96,41 +89,41 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
     border-top: 1px solid rgba(59,130,246,0.2) !important;
 }
 
-/* All BaseWeb Inputs, Text Inputs, Text Areas, and Search Boxes */
-div[data-baseweb="input"],
-div[data-baseweb="base-input"],
-div[data-baseweb="textarea"],
-div[data-baseweb="select"] > div,
-[data-testid="stTextInput"] input,
 [data-testid="stChatInput"],
-[data-testid="stChatInputContainer"] {
+[data-testid="stChatInputContainer"],
+div[data-baseweb="base-input"],
+div[data-baseweb="input"] {
     background-color: #161d2a !important;
     background: #161d2a !important;
-    color: #ffffff !important;
-    border: 1px solid rgba(59,130,246,0.4) !important;
-    border-radius: 12px !important;
+    border: 1px solid #3b82f6 !important;
+    border-radius: 16px !important;
 }
 
-/* Text and cursor color inside inputs */
-input, textarea, select, 
-div[data-baseweb="input"] input, 
+input[type="text"],
+input[type="password"],
+div[data-baseweb="input"] input,
 div[data-baseweb="base-input"] input,
 div[data-baseweb="textarea"] textarea,
-[data-testid="stChatInput"] textarea {
+[data-testid="stTextInput"] input {
+    background-color: #161d2a !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border-color: rgba(59,130,246,0.4) !important;
+}
+
+[data-testid="stChatInput"] textarea,
+div[data-baseweb="textarea"] textarea {
     color: #ffffff !important;
     -webkit-text-fill-color: #ffffff !important;
     background-color: transparent !important;
 }
 
-/* Placeholder styling */
+[data-testid="stChatInput"] textarea::placeholder,
 input::placeholder,
-textarea::placeholder,
-[data-testid="stChatInput"] textarea::placeholder {
+textarea::placeholder {
     color: #94a3b8 !important;
     -webkit-text-fill-color: #94a3b8 !important;
-    opacity: 1 !important;
 }
-/* ========================================================== */
 
 .prism-card { background: #161d2a; border: 1px solid rgba(59,130,246,.35); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
 .void-hero { text-align: center; padding: 28px 10px 20px; }
@@ -141,21 +134,44 @@ textarea::placeholder,
 .topbar-pill { font-size: .65rem; padding: 3px 10px; border-radius: 99px; background: rgba(59,130,246,0.25); color: #60a5fa; border: 1px solid rgba(59,130,246,.5); font-weight: 700; }
 .void-footer { text-align: center; color: #64748b !important; font-size: .78rem; padding: 26px 0 8px; letter-spacing: .4px; }
 .void-footer span { color: #64748b !important; }
-
-.stButton button { 
-    border-radius: 12px !important; 
-    border: 1px solid rgba(148,163,184,.3) !important; 
-    background: #1e293b !important; 
-    color: #f8fafc !important; 
-    transition: all .2s ease !important; 
-    font-weight: 600 !important; 
-}
-.stButton button:hover { 
-    border-color: #3b82f6 !important; 
-    background: #2563eb !important; 
-    box-shadow: 0 0 14px rgba(59,130,246,.5) !important; 
-}
+.stButton button { border-radius: 12px !important; border: 1px solid rgba(148,163,184,.3) !important; background: #1e293b !important; color: #f8fafc !important; transition: all .2s ease !important; font-weight: 600 !important; }
+.stButton button:hover { border-color: #3b82f6 !important; background: #2563eb !important; box-shadow: 0 0 14px rgba(59,130,246,.5) !important; }
 </style>""", unsafe_allow_html=True)
+
+# --- NEW: MINIMALIST AESTHETIC LAYER (overrides the theme above) ---
+MINIMAL_CSS = """<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"],
+[data-testid="stBottom"], [data-testid="stBottom"] > div, [data-testid="stBottomBlockContainer"], .stChatFloatingInputContainer {
+    background: #0b0b0c !important; font-family: 'Inter', system-ui, sans-serif !important; }
+[data-testid="stBottom"], [data-testid="stBottomBlockContainer"], .stChatFloatingInputContainer { border-top: 1px solid #17171a !important; }
+section[data-testid="stSidebar"] { background: #0b0b0c !important; border-right: 1px solid #1c1c1f !important; }
+.block-container { max-width: 1100px !important; }
+p, span, label, li, .stMarkdown { color: #e7e7ea !important; letter-spacing: -.005em; }
+h1, h2, h3, h4 { font-weight: 600 !important; letter-spacing: -.02em !important; }
+.void-gradient { background: none !important; -webkit-text-fill-color: #fafafa !important; color: #fafafa !important; font-weight: 600 !important; font-size: 2.2rem !important; }
+.void-sub, .void-footer, .void-footer span { color: #6b6b73 !important; }
+.stChatMessage { background: transparent !important; border: none !important; border-bottom: 1px solid #17171a !important;
+    border-radius: 0 !important; box-shadow: none !important; padding: 18px 4px !important; }
+.stChatMessage p, .stChatMessage div, .stChatMessage span, .stChatMessage li { font-size: 1rem !important; }
+[data-testid="stForm"], .prism-card { background: #101012 !important; border: 1px solid #1f1f23 !important; border-radius: 14px !important; box-shadow: none !important; }
+[data-testid="stChatInput"], [data-testid="stChatInputContainer"], div[data-baseweb="base-input"], div[data-baseweb="input"] {
+    background: #111113 !important; border: 1px solid #232327 !important; border-radius: 12px !important; }
+input[type="text"], input[type="password"], div[data-baseweb="input"] input, div[data-baseweb="base-input"] input,
+div[data-baseweb="textarea"] textarea, [data-testid="stTextInput"] input { background-color: #111113 !important; border-color: #232327 !important; }
+[data-testid="stChatInput"]:focus-within, div[data-baseweb="input"]:focus-within { border-color: #8b8b95 !important; }
+.stButton button, .stDownloadButton button { background: #111113 !important; border: 1px solid #232327 !important; border-radius: 10px !important;
+    color: #e7e7ea !important; font-weight: 500 !important; box-shadow: none !important; }
+.stButton button:hover, .stDownloadButton button:hover { background: #1a1a1d !important; border-color: #5a5a63 !important; box-shadow: none !important; }
+.stButton button[kind="primary"], .stDownloadButton button[kind="primary"] { background: #fafafa !important; border: none !important; }
+.stButton button[kind="primary"] p, .stDownloadButton button[kind="primary"] p, .stButton button[kind="primary"] span { color: #0b0b0c !important; }
+.topbar-pill { background: transparent !important; color: #8b8b95 !important; border: 1px solid #2a2a2f !important; }
+.topbar-title { letter-spacing: 4px !important; font-weight: 600 !important; }
+[data-testid="stMetric"] { background: transparent !important; }
+[data-testid="stMetricValue"] { font-size: 1.1rem !important; font-weight: 500 !important; }
+hr { border-color: #1c1c1f !important; }
+</style>"""
+st.markdown(MINIMAL_CSS, unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -169,10 +185,15 @@ MAX_HISTORY, MAX_FILE_CHARS = 24, 40000
 OTP_TTL, OTP_MAX_TRIES, OTP_COOLDOWN, LOGIN_DAYS = 600, 5, 30, 365
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 
+# Check exact model IDs at openrouter.ai/models (they change sometimes).
 ENGINES = {
     "☀️ Supernova X (Master Coding Architect)": "qwen/qwen-2.5-coder-32b-instruct",
     "🪐 Nebula Core (Deep Logic Engine)": "deepseek/deepseek-chat",
     "🌙 Void Moon (Swift Resonance)": "google/gemini-2.5-flash",
+    # NEW engines
+    "🧠 Quasar Prime (Max Reasoning)": "deepseek/deepseek-r1",
+    "🔭 Pulsar Pro (Long Context)": "google/gemini-2.5-pro",
+    "🛡️ Aegis (Careful & Precise)": "anthropic/claude-sonnet-4",
 }
 
 def sget(key, default=""):
@@ -330,7 +351,7 @@ def fetch_live_knowledge(query):
         if len(q) < 3:
             return ""
         r = http_session().get(WIKI_URL, params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": 2},
-                       headers={"User-Agent": f"VOIDCore/{APP_VERSION}"}, timeout=4).json()
+                               headers={"User-Agent": f"VOIDCore/{APP_VERSION}"}, timeout=4).json()
         snips = [re.sub(r"<.*?>", "", x.get("snippet", "")) for x in r.get("query", {}).get("search", [])]
         return f"[LIVE ARCHIVE DATA]: {' | '.join(snips)}" if snips else ""
     except Exception:
@@ -364,6 +385,97 @@ def build_live_context(prompt, default_city):
         if ctx:
             lines.append(ctx)
     return "\n".join(lines)
+
+# ============================== 5B. ACCURACY ENGINE (NEW) ==============================
+ACCURACY_RULES = """=== ACCURACY RULES (highest priority) ===
+1. Think step by step before answering. For maths, logic or code, verify your result a second way.
+2. Treat LIVE WEB RESULTS and EXACT CALC lines as the source of truth for current facts.
+3. If they conflict with your memory, trust them and say so briefly.
+4. Never invent facts, quotes, links or numbers. If you are unsure, say exactly what you are unsure about.
+5. Give the answer first, then a short explanation. Name your sources when you used web results.
+6. For code: complete, runnable, no placeholders, with error handling."""
+
+_DDG_HEADERS = {"User-Agent": "Mozilla/5.0 (VOID)"}
+
+def _strip_tags(t):
+    return html.unescape(re.sub(r"<.*?>", "", t)).strip()
+
+@st.cache_data(ttl=900, show_spinner=False, max_entries=128)
+def web_search(query, n=5):
+    q = re.sub(r"\s+", " ", query).strip()[:200]
+    out = []
+    try:
+        r = requests.post("https://html.duckduckgo.com/html/", data={"q": q}, headers=_DDG_HEADERS, timeout=7)
+        hits = re.findall(r'class="result__a" href="([^"]+)"[^>]*>(.*?)</a>.*?class="result__snippet"[^>]*>(.*?)</a>', r.text, re.S)
+        for href, title, snip in hits[:n]:
+            m = re.search(r"uddg=([^&]+)", href)
+            url = urllib.parse.unquote(m.group(1)) if m else href
+            out.append(f"- {_strip_tags(title)} ({url}): {_strip_tags(snip)}")
+    except Exception:
+        pass
+    if not out:
+        try:
+            d = requests.get(WIKI_URL, params={"action": "query", "generator": "search", "gsrsearch": q, "gsrlimit": 3,
+                                               "prop": "extracts", "exintro": 1, "explaintext": 1, "exchars": 500, "format": "json"},
+                             headers=_DDG_HEADERS, timeout=6).json()
+            for p in d.get("query", {}).get("pages", {}).values():
+                out.append(f"- Wikipedia: {p.get('title')}: {_strip_tags(p.get('extract', ''))}")
+        except Exception:
+            pass
+    return "\n".join(out)
+
+_MATH_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+             ast.Pow: operator.pow, ast.Mod: operator.mod, ast.USub: operator.neg, ast.UAdd: operator.pos}
+
+def _math_eval(n):
+    if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+        return n.value
+    if isinstance(n, ast.BinOp) and type(n.op) in _MATH_OPS:
+        a, b = _math_eval(n.left), _math_eval(n.right)
+        if isinstance(n.op, ast.Pow) and abs(b) > 100:
+            raise ValueError("exponent too large")
+        return _MATH_OPS[type(n.op)](a, b)
+    if isinstance(n, ast.UnaryOp) and type(n.op) in _MATH_OPS:
+        return _MATH_OPS[type(n.op)](_math_eval(n.operand))
+    raise ValueError("unsupported")
+
+def exact_math(prompt):
+    res = []
+    for m in re.findall(r"[\d.][\d\s.+\-*/^()%]*[\d)]", prompt):
+        e = m.strip()
+        if len(e) < 3 or not re.search(r"[+\-*/^%]", e):
+            continue
+        try:
+            v = _math_eval(ast.parse(e.replace("^", "**"), mode="eval").body)
+            res.append(f"[EXACT CALC] {e} = {round(v, 10) if isinstance(v, float) else v}")
+        except Exception:
+            continue
+    return "\n".join(res[:4])
+
+_NO_SEARCH = ("```", "write a poem", "write a story", "build a", "make a game", "html app", "refactor")
+
+def grounding(prompt):
+    parts = [ACCURACY_RULES]
+    calc = exact_math(prompt)
+    if calc:
+        parts.append(calc)
+    if len(prompt) > 8 and not any(s in prompt.lower() for s in _NO_SEARCH):
+        res = web_search(prompt)
+        if res:
+            parts.append("[LIVE WEB RESULTS]\n" + res)
+    return "\n".join(parts)
+
+_VERIFY_SYS = """You are VOID's strict fact-checker and editor.
+You get a QUESTION, trusted CONTEXT, and a DRAFT answer.
+1. Check every fact, number, step of maths and line of code in the DRAFT.
+2. Fix anything wrong, vague or missing. Remove anything you cannot support.
+3. Keep the draft's good structure and tone. Never mention this checking process.
+Return ONLY the final improved answer."""
+
+def verify_answer(engine, question, draft, context=""):
+    msgs = [{"role": "user", "content": f"QUESTION:\n{question}\n\nCONTEXT:\n{context[-6000:]}\n\nDRAFT:\n{draft}"}]
+    res, _ = call_void_engine(engine, _VERIFY_SYS, msgs, 0.0, 3200)
+    return res or draft
 
 # ============================== 6. DOCUMENT FORGE (PDF + SLIDES) ==============================
 DOC_TRIGGERS = ("pdf", "ppt", "powerpoint", "slide", "presentation", "study notes", "revision notes", "make notes",
@@ -444,18 +556,18 @@ def generate_real_pdf_bytes(title, markdown, author="VOID Forge"):
     return bytes(out)
 
 SLIDE_TPL = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>%%TITLE%%</title><style>
-body{margin:0;background:#11151c;color:#f0f6fc;font-family:'Segoe UI',system-ui,sans-serif;display:flex;flex-direction:column;height:96vh;justify-content:space-between}
+body{margin:0;background:#0b0b0c;color:#f0f6fc;font-family:'Segoe UI',system-ui,sans-serif;display:flex;flex-direction:column;height:96vh;justify-content:space-between}
 .wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
-.slide{display:none;width:100%;max-width:820px;background:linear-gradient(145deg,#181f2c,#11151c);border:1px solid rgba(59,130,246,.4);border-radius:24px;padding:40px 48px;box-shadow:0 20px 50px rgba(0,0,0,.7);min-height:310px;box-sizing:border-box}
+.slide{display:none;width:100%;max-width:820px;background:#101012;border:1px solid #232327;border-radius:20px;padding:40px 48px;min-height:310px;box-sizing:border-box}
 .slide.on{display:block}
-.badge{font-size:11px;letter-spacing:2px;color:#3b82f6;font-weight:700;margin-bottom:14px}
+.badge{font-size:11px;letter-spacing:2px;color:#8b8b95;font-weight:700;margin-bottom:14px}
 .count{position:fixed;top:14px;right:20px;font-size:12px;color:#64748b;font-weight:700;letter-spacing:1px}
-h2{margin-top:0;font-size:28px;background:linear-gradient(90deg,#3b82f6,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+h2{margin-top:0;font-size:28px;color:#fafafa}
 .body{font-size:16px;line-height:1.7;color:#cbd5e1}
 code{background:#1e293b;padding:1px 6px;border-radius:5px}
 .ctl{display:flex;justify-content:center;gap:16px;padding:14px}
-button{background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.5);padding:10px 22px;border-radius:99px;cursor:pointer;font-weight:700;transition:.2s}
-button:hover{background:#3b82f6;color:#fff;box-shadow:0 0 15px rgba(59,130,246,.5)}
+button{background:#111113;color:#e7e7ea;border:1px solid #2a2a2f;padding:10px 22px;border-radius:99px;cursor:pointer;font-weight:600;transition:.2s}
+button:hover{background:#fafafa;color:#0b0b0c}
 @media print{.ctl{display:none}body{height:auto;background:#fff}.slide{display:block;page-break-after:always;margin-bottom:16px}}
 </style></head><body><div class="wrap">%%SLIDES%%</div>
 <div class="count">%%COUNT%%</div>
@@ -487,7 +599,7 @@ def generate_interactive_slides_html(title, markdown):
         heading = lines[0].lstrip("#").strip() or f"Slide {i + 1}"
         body = "<br>".join(_md_inline(l) for l in lines[1:] if l.strip())
         out.append(f'<div class="slide{" on" if i == 0 else ""}"><div class="badge">VOID PRISM DECK • SLIDE {i + 1} OF {len(secs)}</div>'
-                    f'<h2>{esc(heading.replace("**", ""))}</h2><div class="body">{body}</div></div>')
+                   f'<h2>{esc(heading.replace("**", ""))}</h2><div class="body">{body}</div></div>')
     return (SLIDE_TPL.replace("%%TITLE%%", esc(title)).replace("%%COUNT%%", f"SLIDE 1 / {len(secs)}")
             .replace("%%SLIDES%%", "".join(out)))
 
@@ -587,7 +699,7 @@ if "user_email" not in st.session_state:
                 '<div class="void-gradient">VOID Sovereign Intelligence</div>'
                 '<div class="void-sub">Direct Search Landing & Access Gateway</div></div>',
                 unsafe_allow_html=True)
-    
+
     _, mid, _ = st.columns([1, 1.4, 1])
     with mid:
         st.markdown("<p style='text-align:center; color:#94a3b8; font-size:0.95rem; margin-bottom:10px;'>Ask anything right now to enter instantly as a Guest</p>", unsafe_allow_html=True)
@@ -760,13 +872,13 @@ if auto_scroll:
 c1, c2, c3, c4 = st.columns([1.9, 1.8, 1.7, 1.2])
 with c1:
     ui_mode = st.selectbox("Dimension", ["✦ VOID Core & Prism", "📖 VOID Codex (Study, PDF & Slides)",
-                                        "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab",
-                                        "🧬 Self-Evolution Lab", "🛰️ Ship Telemetry & Insights"], label_visibility="collapsed")
+                                         "⚡ Live Web App Studio", "🛠️ Side-by-Side Code Lab",
+                                         "🧬 Self-Evolution Lab", "🛰️ Ship Telemetry & Insights"], label_visibility="collapsed")
 with c2:
     cosmic_entity = st.selectbox("Cosmic Engine", list(ENGINES), label_visibility="collapsed")
 with c3:
     persona = st.selectbox("Resonance Mode", ["✦ VOID Omni (Universal)", "🎓 Master Scholastic Tutor",
-                                            "💻 Full-Stack Architect", "🎨 UI & Slide Designer", "🐞 Deep Bug Hunter"],
+                                              "💻 Full-Stack Architect", "🎨 UI & Slide Designer", "🐞 Deep Bug Hunter"],
                            label_visibility="collapsed")
 with c4:
     with st.popover("➕ Attach & Tune", use_container_width=True):
@@ -779,8 +891,10 @@ with c4:
             except UnicodeDecodeError:
                 st.error("Unable to read this file as text.")
         task_depth = st.select_slider("Depth", ["Swift", "Balanced", "Maximum Power"], value="Maximum Power")
+        accuracy_mode = st.toggle("🎯 Verified Answer Mode", value=True,
+                                  help="Answers are drafted, then fact-checked and corrected by a second pass. Slower but more accurate.")
         show_thinking = st.toggle("⌨️ Show Live Typing Telemetry", value=True,
-                                  help="Echo the model's raw tokens as they stream in. Turn off for a clean console.")
+                                  help="Echo the model's raw tokens as they stream in. Turn off for a clean console. (Used when Verified Answer Mode is off.)")
         temperature = st.slider("Creativity", 0.0, 1.0, 0.25, 0.05)
         max_tokens = st.slider("Max Output Length", 500, 4000, 3200, 100)
 
@@ -799,7 +913,7 @@ def build_system_prompt(query, is_prism=False, extra=""):
            if is_prism else
            "Respond naturally and conversationally. Do NOT format casual chat as formal reports unless the user asks for a PDF, notes, or slides.")
     return f"""You are VOID, an elite sovereign coding intelligence and digital workspace created by {FOUNDER_NAME}.
-Never mention any outside company or model names; you are strictly VOID, powered by the Cosmic Engines (Supernova X, Nebula Core, Void Moon).
+Never mention any outside company or model names; you are strictly VOID, powered by the Cosmic Engines (Supernova X, Nebula Core, Void Moon, Quasar Prime, Pulsar Pro, Aegis).
 
 === CURRENT OPERATOR ===
 Name: {user_name} | Email: {user_email} | City: {user_city}
@@ -813,6 +927,8 @@ If asked who created VOID or who the founder is, present this proudly.
 === LIVE TELEMETRY ===
 {build_live_context(query, user_city)}
 Use this for current time, date, weather, and facts.
+
+{grounding(query)}
 
 === STYLE ===
 Mode: {persona} | Depth: {task_depth}
@@ -893,12 +1009,22 @@ if ui_mode == "✦ VOID Core & Prism":
                 reply = None
                 try:
                     system = build_system_prompt(active_prompt, detect_prism_intent(active_prompt))
-                    gen = stream_void_engine(cosmic_entity, system, current_chat["messages"], temperature, max_tokens)
-                    if show_thinking:
-                        reply = st.write_stream(gen)
+                    if accuracy_mode:
+                        with st.spinner("Thinking, checking, verifying..."):
+                            draft, err = call_void_engine(cosmic_entity, system, current_chat["messages"], temperature, max_tokens)
+                            if draft:
+                                reply = verify_answer(cosmic_entity, active_prompt, draft, grounding(active_prompt))
+                            else:
+                                st.error(err)
+                        if reply:
+                            st.markdown(reply)
                     else:
-                        reply = st.write_stream(clean_stream(gen))
-                    if not reply:
+                        gen = stream_void_engine(cosmic_entity, system, current_chat["messages"], temperature, max_tokens)
+                        if show_thinking:
+                            reply = st.write_stream(gen)
+                        else:
+                            reply = st.write_stream(clean_stream(gen))
+                    if not reply and not accuracy_mode:
                         st.error("The engine returned an empty response. Please try again.")
                 except EngineError as e:
                     st.error(str(e))
@@ -983,6 +1109,8 @@ elif ui_mode == "📖 VOID Codex (Study, PDF & Slides)":
             bump_usage()
             with st.spinner(f"Forge '{topic}' in progress..."):
                 res, err = call_void_engine(cosmic_entity, sys_p, [{"role": "user", "content": f"Forge {fmt} for: {topic}"}], 0.2, 2600)
+                if res and accuracy_mode:
+                    res = verify_answer(cosmic_entity, f"Forge {fmt} for: {topic}", res, grounding(topic))
             if res:
                 st.session_state.codex_output, st.session_state.codex_topic = res, topic.strip()
                 st.rerun()
@@ -1023,7 +1151,7 @@ elif ui_mode == "⚡ Live Web App Studio":
     st.markdown("### ⚡ VOID Live Web App & Game Studio")
     st.caption("Describe a web app, calculator, dashboard, or mini-game and VOID builds it live.")
     ui_prompt = st.text_area("What should VOID build?", height=85,
-                            placeholder="E.g., A dark-mode Hand Cricket game or a Pomodoro study dashboard...")
+                             placeholder="E.g., A dark-mode Hand Cricket game or a Pomodoro study dashboard...")
     if st.button("🚀 Forge & Launch App", type="primary"):
         if ui_prompt.strip():
             sys_p = "Output ONLY one complete, self-contained HTML file (embedded <style> and <script>) inside a ```html code block."
@@ -1188,3 +1316,4 @@ elif ui_mode == "🛰️ Ship Telemetry & Insights":
 # ============================== 12. FOOTER ==============================
 st.markdown('<div class="void-footer">⚡ VOID — Sovereign OS Intelligence • Forged by ' + esc(FOUNDER_NAME) +
             ' • Prism OS v' + APP_VERSION + '</div>', unsafe_allow_html=True)
+
