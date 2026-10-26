@@ -38,7 +38,7 @@ try:
 except Exception:
     pass
 
-# --- MATERIAL SLATE OS THEME & ABSOLUTE TEXT READABILITY & INPUT FIXES ---
+# --- MATERIAL SLATE OS THEME & FOOLPROOF READABILITY & INPUT FIXES ---
 st.markdown("""<style>
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     background-color: #11151c !important;
@@ -77,18 +77,21 @@ p, span, label, h1, h2, h3, h4, h5, h6, .stMarkdown, .stText {
 }
 
 /* ========================================================== */
-/* FOOLPROOF SLATE LOCK FOR STREAMLIT CHAT INPUT CONTAINER */
+/* ABSOLUTE PERMANENT LOCK FOR CHAT INPUT BOX & BOTTOM BAR */
 /* ========================================================== */
 [data-testid="stBottom"],
 [data-testid="stBottom"] > div,
 [data-testid="stBottomBlockContainer"],
-.stChatFloatingInputContainer,
-[data-testid="stChatInputContainer"] {
+.stChatFloatingInputContainer {
     background-color: #11151c !important;
-    background: #11151c !important;
+    background-image: none !important;
+    border-top: 1px solid rgba(59,130,246,0.2) !important;
 }
 
-[data-testid="stChatInput"] {
+[data-testid="stChatInput"],
+[data-testid="stChatInputContainer"],
+div[data-baseweb="base-input"],
+div[data-baseweb="input"] {
     background-color: #161d2a !important;
     background: #161d2a !important;
     border: 1px solid #3b82f6 !important;
@@ -104,7 +107,9 @@ div[data-baseweb="textarea"] textarea {
     background-color: transparent !important;
 }
 
-[data-testid="stChatInput"] textarea::placeholder {
+[data-testid="stChatInput"] textarea::placeholder,
+div[data-baseweb="base-input"] input::placeholder,
+div[data-baseweb="input"] input::placeholder {
     color: #94a3b8 !important;
     -webkit-text-fill-color: #94a3b8 !important;
 }
@@ -121,19 +126,7 @@ div[data-baseweb="textarea"] textarea {
 .void-footer span { color: #64748b !important; }
 .stButton button { border-radius: 12px !important; border: 1px solid rgba(148,163,184,.3) !important; background: #1e293b !important; color: #f8fafc !important; transition: all .2s ease !important; font-weight: 600 !important; }
 .stButton button:hover { border-color: #3b82f6 !important; background: #2563eb !important; box-shadow: 0 0 14px rgba(59,130,246,.5) !important; }
-</style>
-
-<script>
-// Forces the bottom bar to stay dark even if Streamlit tries to inject inline white styles
-const observer = new MutationObserver(() => {
-    document.querySelectorAll('[data-testid="stBottom"], [data-testid="stBottomBlockContainer"], .stChatFloatingInputContainer').forEach(el => {
-        el.style.backgroundColor = '#11151c';
-        el.style.backgroundImage = 'none';
-    });
-});
-observer.observe(document.body, { childList: true, subtree: true });
-</script>
-""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
 
 # ============================== 2. CONFIG & SECRETS ==============================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -181,14 +174,16 @@ def http_session():
 # ============================== 3. DATABASE ==============================
 def load_db():
     try:
-        with open(DB_FILE, encoding="utf-8") as f:
-            d = json.load(f)
-        d.setdefault("users", {})
-        d.setdefault("chats", {})
-        d.setdefault("usage", {})
-        return d
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            d.setdefault("users", {})
+            d.setdefault("chats", {})
+            d.setdefault("usage", {})
+            return d
     except Exception:
-        return {"users": {}, "chats": {}, "usage": {}}
+        pass
+    return {"users": {}, "chats": {}, "usage": {}}
 
 def save_db(d):
     try:
@@ -273,12 +268,15 @@ WMO = {0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast", 45:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def geocode(city):
-    r = http_session().get(GEO_URL, params={"name": city, "count": 1, "language": "en", "format": "json"}, timeout=5).json()
-    res = (r.get("results") or [None])[0]
-    if not res:
+    try:
+        r = http_session().get(GEO_URL, params={"name": city, "count": 1, "language": "en", "format": "json"}, timeout=5).json()
+        res = (r.get("results") or [None])[0]
+        if not res:
+            return None
+        label = ", ".join(filter(None, [res.get("name"), res.get("admin1"), res.get("country")]))
+        return res["latitude"], res["longitude"], label
+    except Exception:
         return None
-    label = ", ".join(filter(None, [res.get("name"), res.get("admin1"), res.get("country")]))
-    return res["latitude"], res["longitude"], label
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_live_weather(city):
@@ -1114,7 +1112,7 @@ elif ui_mode == "🛰️ Ship Telemetry & Insights":
 
     st.markdown("##### 🔥 Daily Engine Load (last 30 days)")
     today = datetime.now().date()
-    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
+    days = [(today - timedelta(days=i)).strftime("%Y-%m-%d"] for i in range(29, -1, -1)]
     series = pd.Series([db.get("usage", {}).get(d, 0) for d in days], index=[d[5:] for d in days])
     if series.sum() > 0:
         st.area_chart(series, height=260)
