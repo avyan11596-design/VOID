@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+import email.message
 import html
 import json
 import os
 import re
+import smtplib
 import textwrap
 import urllib.parse
 import uuid
@@ -309,7 +311,7 @@ def logout_operator():
 
 
 # ==============================================================================
-# 4. SIMPLE & CLEAN SIGN-IN / WELCOME SCREEN
+# 4. SIMPLE SIGN-IN PORTAL
 # ==============================================================================
 if not st.session_state.authenticated:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -369,7 +371,33 @@ def is_safe_query(query: str) -> tuple[bool, str]:
 
 
 # ==============================================================================
-# 6. SMART QUERY OPTIMIZER & PARALLEL REAL-TIME SEARCH ENGINE
+# 6. EMAIL DISPATCHER SYSTEM (Gmail SMTP Integration)
+# ==============================================================================
+def send_void_email(recipient_email: str, subject: str, body_text: str) -> tuple[bool, str]:
+    """Sends emails securely using Gmail SMTP credentials stored in Streamlit Secrets or environment variables."""
+    smtp_user = st.secrets.get("SMTP_EMAIL", os.getenv("SMTP_EMAIL", ""))
+    smtp_pass = st.secrets.get("SMTP_PASSWORD", os.getenv("SMTP_PASSWORD", ""))
+
+    if not smtp_user or not smtp_pass:
+        return False, "SMTP credentials (`SMTP_EMAIL` and `SMTP_PASSWORD`) are not configured in Streamlit Secrets."
+
+    try:
+        msg = email.message.EmailMessage()
+        msg.set_content(body_text)
+        msg["Subject"] = subject
+        msg["From"] = smtp_user
+        msg["To"] = recipient_email
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        return True, f"Successfully dispatched secure transmission to {recipient_email}!"
+    except Exception as e:
+        return False, f"Email dispatch failed: {str(e)}"
+
+
+# ==============================================================================
+# 7. SMART QUERY OPTIMIZER & PARALLEL REAL-TIME SEARCH ENGINE
 # ==============================================================================
 STOP_FILLERS = {
     "no", "bro", "hey", "hi", "hello", "please", "tell", "me", "about",
@@ -622,7 +650,7 @@ def gather_parallel_telemetry(user_prompt: str) -> str:
 
 
 # ==============================================================================
-# 7. FAST MULTI-ENGINE AI ROUTER
+# 8. FAST MULTI-ENGINE AI ROUTER
 # ==============================================================================
 def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
     safe, warning = is_safe_query(user_prompt)
@@ -721,7 +749,7 @@ def query_void_intelligence(user_prompt: str, chat_history: list) -> str:
 
 
 # ==============================================================================
-# 8. SIDEBAR NAVIGATION
+# 9. SIDEBAR NAVIGATION
 # ==============================================================================
 active_session = st.session_state.sessions[st.session_state.current_session]
 
@@ -795,7 +823,7 @@ with st.sidebar:
     )
 
 # ==============================================================================
-# 9. TOP TELEMETRY ROW
+# 10. TOP TELEMETRY ROW
 # ==============================================================================
 ist_now = get_ist_now()
 t_col1, t_col2, t_col3, t_col4 = st.columns(4)
@@ -814,13 +842,13 @@ with t_col4:
     )
 
 # ==============================================================================
-# 10. OPTIONAL PRISM PANEL
+# 11. OPTIONAL PRISM PANEL (Includes Live Sports, Weather & Email Dispatcher)
 # ==============================================================================
 if st.session_state.prism_panel:
     with st.container():
-        st.markdown("#### ⚡ VOID Prism Panel — Live Telemetry & Forge")
-        p_tab1, p_tab2, p_tab3 = st.tabs(
-            ["🏏⚽ Live Cricket & Football", "🌦️ City Weather Radar", "📄 Printable Notes Exporter"]
+        st.markdown("#### ⚡ VOID Prism Panel — Live Telemetry & Dispatch")
+        p_tab1, p_tab2, p_tab3, p_tab4 = st.tabs(
+            ["🏏⚽ Live Sports", "🌦️ Weather Radar", "📄 Export Notes", "📧 Email Dispatcher"]
         )
         with p_tab1:
             st.markdown("**🏏 India Tour of New Zealand 2026 (Live Series Status: IND leads T20Is 2–0)**")
@@ -829,8 +857,7 @@ if st.session_state.prism_panel:
                 "- **2nd T20I (24 Oct):** India won by 4 wickets (Christchurch)\n"
                 "- **3rd T20I (27 Oct):** Wellington — **12:30 PM IST**\n"
                 "- **4th T20I (30 Oct):** Auckland — **12:30 PM IST**\n"
-                "- **5th T20I (1 Nov):** Hamilton — **12:30 PM IST**\n"
-                "- **5 ODIs:** 4 Nov – 15 Nov (7:30 AM IST) | **2 Tests:** 19 Nov – 1 Dec (3:30 AM IST)"
+                "- **5th T20I (1 Num):** Hamilton — **12:30 PM IST**"
             )
             cric_live = fetch_live_cricket_rss()
             for c_item in cric_live[:4]:
@@ -852,10 +879,30 @@ if st.session_state.prism_panel:
                 )
             else:
                 st.caption("Ask VOID to generate study notes in chat first to export them here.")
+        with p_tab4:
+            st.markdown("#### 📧 VOID Secure Email Transmission")
+            recipient_input = st.text_input("Recipient Email", placeholder="name@gmail.com")
+            email_subj = st.text_input("Subject", value="VOID AI Intelligence Export")
+            
+            default_body = "Here are your notes exported from VOID OS."
+            if active_session["messages"]:
+                default_body = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in active_session["messages"][-4:]])
+            
+            email_content = st.text_area("Email Content / Notes", value=default_body, height=120)
+
+            if st.button("🚀 Dispatch Secure Email", use_container_width=True):
+                if recipient_input.strip():
+                    success, msg = send_void_email(recipient_input.strip(), email_subj, email_content)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.warning(msg)
+                else:
+                    st.warning("Please enter a valid recipient email address.")
         st.markdown("<hr style='border-color:#161f33;'>", unsafe_allow_html=True)
 
 # ==============================================================================
-# 11. SPACIOUS HERO SECTION & 4 QUICK ACTION PILLS
+# 12. SPACIOUS HERO SECTION & 4 QUICK ACTION PILLS
 # ==============================================================================
 triggered_prompt = None
 
@@ -889,7 +936,7 @@ if len(active_session["messages"]) == 0:
     )
 
 # ==============================================================================
-# 12. CHAT HISTORY & HIGH-SPEED EXECUTION
+# 13. CHAT HISTORY & HIGH-SPEED EXECUTION
 # ==============================================================================
 for message in active_session["messages"]:
     with st.chat_message(message["role"]):
