@@ -3602,7 +3602,6 @@ def generate_interactive_slides_html(
       f"<h2>{h}</h2>"
       f'<div class="body">{body}</div>'
       f"</div>"
-    )
   tpl = [
     "<!DOCTYPE html>",
     "<html>",
