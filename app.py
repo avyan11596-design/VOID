@@ -3773,17 +3773,14 @@ def generate_interactive_slides_html(
     "}",
     "</style>",
     "</head>",
-    "<body>",
-    f'<div class="wrap">{"".join(slides_html)}</div>',
+   f'<div class="wrap">{"".join(slides_html)}</div>',
     '<div class="ctl">',
-    f'<div class="wrap">{"".join(slides_html)}</div>',
-        '<div class="ctl">',
-        '<button onclick="go(-1)">◀ Prev</button>',
-        '<button onclick="window.print()">Export to PDF</button>',
-        '<button onclick="go(1)">Next ▶</button>',
-        "</div>",
-    )
-    return "\n".join(out)
+    '<button onclick="go(-1)">◀ Prev</button>',
+    '<button onclick="window.print()">Export to PDF</button>',
+    '<button onclick="go(1)">Next ▶</button>',
+    "</div>",
+)
+return "\n".join(out)
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
