@@ -3593,7 +3593,7 @@ def generate_interactive_slides_html(
       for l in lines[1:]
       if l.strip()
     )
-   cls = "slide on" if i == 0 else "slide"
+       cls = "slide on" if i == 0 else "slide"
     slides_html.append(
         f'<div class="{cls}">'
         f'<div class="badge">'
