@@ -3787,7 +3787,7 @@ def generate_interactive_slides_html(
     title,
     markdown,
 ):
-    secs = [
+  secs = [
   secs = [
     s
     for s in re.split(
