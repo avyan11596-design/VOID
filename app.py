@@ -530,6 +530,8 @@ class RateLimiter:
 
 
 def audit(db, event: str, severity: str = "info", detail: str = "", actor: str = "system"):
+    if not isinstance(db.get("audit"), list):
+        db["audit"] = []
     db.setdefault("audit", [])
     db["audit"].append({
         "id": uuid.uuid4().hex[:10],
@@ -558,8 +560,8 @@ def load_db():
         if os.path.exists(DB_FILE):
             with open(DB_FILE, encoding="utf-8") as f:
                 d = json.load(f)
-            for k in ("users", "chats", "usage", "audit", "rate_limits"):
-                d.setdefault(k, {})
+            for k, empty in (("users", {}), ("chats", {}), ("usage", {}), ("audit", []), ("rate_limits", {})):
+                d.setdefault(k, empty)
             return d
     except Exception:
         pass
@@ -577,6 +579,54 @@ def save_db(d):
 
 
 db = load_db()
+
+
+def migrate_db(d):
+    """One-time migration of databases created by older VOID versions (v8 and earlier)
+    so every user record has the v9-MA schema: prefs, learning, mood_log, schedule, tasks, secure_notes."""
+    legacy_learning = {"feedback": [], "corrections": [], "topic_affinity": {}, "seen_examples": 0}
+    changed = False
+    # Top-level collections must have the correct container types
+    if not isinstance(d.get("audit"), list):
+        d["audit"] = list(d["audit"].values()) if isinstance(d.get("audit"), dict) else []
+        changed = True
+    if not isinstance(d.get("rate_limits"), dict):
+        d["rate_limits"] = {}
+        changed = True
+    for key, empty in (("users", {}), ("chats", {}), ("usage", {})):
+        if not isinstance(d.get(key), dict):
+            d[key] = empty
+            changed = True
+    for email, rec in (d.get("users") or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        rec.setdefault("prefs", dict(DEFAULT_PREFS))
+        for k, v in DEFAULT_PREFS.items():
+            rec["prefs"].setdefault(k, v)
+        if "learning" not in rec or not isinstance(rec.get("learning"), dict):
+            rec["learning"] = dict(legacy_learning)
+            changed = True
+        for k, default in (("feedback", []), ("corrections", []), ("topic_affinity", {}), ("seen_examples", 0)):
+            rec["learning"].setdefault(k, default if not isinstance(default, type) else default())
+        for key, empty in (("mood_log", []), ("schedule", []), ("tasks", []), ("secure_notes", []),
+                           ("recent_topics", [])):
+            if key not in rec:
+                rec[key] = empty
+                changed = True
+        rec.setdefault("memory", "")
+        rec.setdefault("prompts", 0)
+    # Older chats lacked the "created" timestamp
+    for chats in (d.get("chats") or {}).values():
+        for cid, chat in chats.items():
+            if isinstance(chat, dict) and "created" not in chat:
+                chat["created"] = datetime.now(IST).strftime("%b %d, %H:%M")
+                changed = True
+    if changed:
+        save_db(d)
+    return d
+
+
+db = migrate_db(db)
 limiter = RateLimiter(db)
 
 
@@ -2185,8 +2235,10 @@ else:
 # ============================== 16. ACTIVE USER, BRAIN & SIDEBAR COMMAND DECK ==============================
 user_email = st.session_state.user_email
 is_founder = user_email in FOUNDERS or "avyan" in user_email.lower()
-user_record = db["users"].get(user_email) or ensure_user(user_email)
+# Always run ensure_user: it migrates v8-era records on the fly and never overwrites existing data.
+user_record = ensure_user(user_email)
 prefs = get_prefs(user_record)
+user_record.setdefault("learning", {"feedback": [], "corrections": [], "topic_affinity": {}, "seen_examples": 0})
 brain = AdaptiveBrain(user_record["learning"])
 user_name = user_record.get("name", "Operator")
 user_city = user_record.get("city", "Varanasi")
