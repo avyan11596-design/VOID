@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import secrets as pysecrets
+import smtplib
 import sys
 import textwrap
 import time
@@ -21,6 +22,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 
 import pandas as pd
 import requests
@@ -46,37 +48,12 @@ except OSError:
 
 # ============================== 0. 5,000-LINE MONOLITH COMPILER ==============================
 def build_5000_line_monolith(target_lines: int = 5050) -> str:
-    """Deterministically expands app.py to 5,050+ lines of valid, runnable Python."""
+    """Return the actual app source; do not pad the code with fake generated modules."""
     try:
         with open(__file__, "r", encoding="utf-8") as f:
-            base = f.read()
+            return f.read()
     except OSError:
-        base = "# VOID Sovereign Core\n"
-    marker = "# ==================== [VOID 5000-LINE EXPANDED SOVEREIGN ARCHIVE] ===================="
-    if marker in base:
-        base = base.split(marker)[0].rstrip() + "\n"
-    needed = max(0, target_lines - (base.count("\n") + 1) - 10)
-    ext = ["", marker, "SOVEREIGN_OFFLINE_ENCYCLOPEDIA = {"]
-    for i in range(1, (needed // 6) + 3):
-        ext.extend([
-            f'    "CODEX_MOD_{i:04d}": {{',
-            f'        "id": "VOID-MOD-{i:04d}",',
-            f'        "domain": "Sovereign STEM & Architecture Matrix #{i:04d}",',
-            f'        "formulas": "F = ma | E = mc^2 | PV = nRT | V = IR | O(n log n) [#{i}]",',
-            f'        "summary": "Verified offline reference module {i:04d} for VOID Hyperion OS.",',
-            f'        "verified": True,',
-            f'    }},',
-        ])
-    ext.append("}\n")
-    return base + "\n".join(ext)
-
-
-if __name__ == "__main__" and "--expand-5000" in sys.argv:
-    _exp = build_5000_line_monolith(5050)
-    with open(__file__, "w", encoding="utf-8") as _f:
-        _f.write(_exp)
-    print(f"[VOID] Expanded {__file__} to {_exp.count(chr(10)) + 1} lines!")
-    sys.exit(0)
+        return "# VOID Hyperion source could not be read from disk.\\n"
 
 
 # ============================== 1. BRAND & PAGE CONFIG ==============================
@@ -748,14 +725,32 @@ def _src_serper(q, n):
 
 
 def _src_ddg(q, n):
+    """DuckDuckGo HTML fallback with tolerant result-link parsing."""
     try:
-        r = requests.post("https://html.duckduckgo.com/html/", data={"q": q}, headers=_DDG_HEADERS, timeout=8)
-        hits = re.findall(r'class="result__a" href="([^"]+)"[^>]*>(.*?)</a>.*?class="result__snippet"[^>]*>(.*?)</a>', r.text, re.S)
+        r = requests.post(
+            "https://html.duckduckgo.com/html/", data={"q": q},
+            headers=_DDG_HEADERS, timeout=10,
+        )
+        r.raise_for_status()
         out = []
-        for href, title, snip in hits[:n]:
-            m = re.search(r"uddg=([^&]+)", href)
-            url = urllib.parse.unquote(m.group(1)) if m else href
-            out.append(f"- {_strip_tags(title)} ({url}): {_strip_tags(snip)}")
+        # Parse anchors independently; DDG changes wrapper markup periodically.
+        anchors = re.findall(
+            r'<a\b[^>]*class=["\\\'][^"\\\']*result__a[^"\\\']*["\\\'][^>]*>.*?</a>',
+            r.text, re.S | re.I,
+        )
+        for anchor in anchors:
+            m = re.search(r'href=["\\\']([^"\\\']+)["\\\']', anchor, re.I)
+            if not m:
+                continue
+            href = m.group(1)
+            redirect = re.search(r"(?:[?&])uddg=([^&]+)", href)
+            url = urllib.parse.unquote(redirect.group(1)) if redirect else href
+            title = _strip_tags(re.sub(r"^.*?>", "", anchor, count=1).rsplit("</a>", 1)[0])
+            if not url.startswith(("https://", "http://")) or not title:
+                continue
+            out.append(f"- {title} ({url})")
+            if len(out) >= max(1, min(int(n), 10)):
+                break
         return out
     except Exception:
         return []
@@ -770,21 +765,104 @@ def _src_wiki(q, n=2):
 
 
 def _src_google_news(q, n=5):
+    """Fetch recent headlines from Google News RSS; publication timestamps are retained."""
     try:
-        query = (re.sub(r"\s+", " ", q).strip()[:150] + " when:7d").strip()
-        r = requests.get("https://news.google.com/rss/search", params={"q": query, "hl": "en-IN", "gl": "IN", "ceid": "IN:en"}, headers=_DDG_HEADERS, timeout=9)
+        clean_q = re.sub(r"\s+", " ", (q or "")).strip()[:150]
+        if clean_q.lower() in {"current affairs", "news", "latest news", "headlines", "today's news"}:
+            clean_q = "India world current affairs"
+        query = (clean_q + " when:7d").strip()
+        r = requests.get(
+            "https://news.google.com/rss/search",
+            params={"q": query, "hl": "en-IN", "gl": "IN", "ceid": "IN:en"},
+            headers=_DDG_HEADERS, timeout=12,
+        )
         r.raise_for_status()
         root = ET.fromstring(r.content)
         out = []
-        for item in root.findall(".//item")[:n]:
+        for item in root.findall(".//item")[:max(1, min(int(n), 10))]:
             title = _strip_tags(item.findtext("title", ""))
             link = (item.findtext("link", "") or "").strip()
             pub = (item.findtext("pubDate", "") or "").strip()
-            if title and link.startswith("https://"):
+            if title and link.startswith(("https://", "http://")):
                 out.append(f"- {title} ({link}) [published {pub}]")
         return out
     except Exception:
         return []
+
+
+
+def github_search_repositories(query, limit=6):
+    """Search public GitHub repositories. A token is optional but improves rate limits."""
+    q = (query or "").strip()[:180]
+    if not q:
+        return [], "Enter a repository topic or name."
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "VOID-Hyperion"}
+    token = sget("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        response = requests.get(
+            "https://api.github.com/search/repositories",
+            params={"q": q, "sort": "updated", "order": "desc", "per_page": max(1, min(int(limit), 10))},
+            headers=headers, timeout=12,
+        )
+        if response.status_code == 403:
+            return [], "GitHub rate limit reached. Add GITHUB_TOKEN to Streamlit secrets to raise the limit."
+        response.raise_for_status()
+        results = []
+        for item in response.json().get("items", []):
+            results.append({
+                "name": item.get("full_name", "unknown"),
+                "url": item.get("html_url", ""),
+                "description": item.get("description") or "No description provided.",
+                "stars": item.get("stargazers_count", 0),
+                "language": item.get("language") or "Not specified",
+                "updated": (item.get("updated_at") or "")[:10],
+            })
+        return results, None
+    except requests.RequestException as exc:
+        return [], f"GitHub request failed: {str(exc)[:180]}"
+
+
+def send_smtp_email(to_address, subject, body):
+    """Send an email only when SMTP settings are explicitly configured in secrets/env."""
+    host = sget("SMTP_HOST")
+    port = sget("SMTP_PORT", "587")
+    username = sget("SMTP_USERNAME")
+    password = sget("SMTP_PASSWORD")
+    sender = sget("SMTP_FROM") or username
+    if not all((host, username, password, sender)):
+        return False, "Email is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, and SMTP_FROM in Streamlit secrets."
+    to_address = (to_address or "").strip()
+    subject = (subject or "").strip()
+    body = (body or "").strip()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", to_address):
+        return False, "Enter a valid recipient email address."
+    if not subject or not body:
+        return False, "Subject and message are required."
+    if len(subject) > 180 or len(body) > 20000:
+        return False, "Subject or message is too long."
+    message = EmailMessage()
+    message["From"] = sender
+    message["To"] = to_address
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        smtp_port = int(port)
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(host, smtp_port, timeout=20) as server:
+                server.login(username, password)
+                server.send_message(message)
+        else:
+            with smtplib.SMTP(host, smtp_port, timeout=20) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(username, password)
+                server.send_message(message)
+        return True, "Email sent successfully."
+    except (OSError, smtplib.SMTPException, ValueError) as exc:
+        return False, f"Email send failed: {str(exc)[:180]}"
 
 
 @st.cache_data(ttl=120, show_spinner=False, max_entries=256)
@@ -858,12 +936,17 @@ def exact_math(prompt):
 
 
 def needs_search(prompt, depth="Standard"):
+    """Current-affairs and live-data requests take priority over creative-task exclusions."""
     if depth == "Off":
         return False
-    p = (prompt or "").lower()
-    if len(p.strip()) < 4 or any(s in p for s in _NO_SEARCH):
+    p = re.sub(r"\s+", " ", (prompt or "").lower()).strip()
+    if len(p) < 4:
         return False
-    return is_current_query(p) or any(w in p for w in KNOW_WORDS) or depth == "Deep"
+    if is_current_query(p):
+        return True
+    if any(s in p for s in _NO_SEARCH):
+        return False
+    return any(w in p for w in KNOW_WORDS) or depth == "Deep"
 
 
 def grounding(prompt, depth="Standard", diag=None):
@@ -1362,7 +1445,7 @@ with st.sidebar:
     m2.metric("Chats", len(user_chats))
     m3.metric("Runs", user_record.get("prompts", 0))
 
-    with st.expander("⚡ 5,000-Line Compiler"):
+    with st.expander("📦 Download App Source"):
         monolith_code = build_5000_line_monolith(5050)
         st.download_button(
             f"📥 Download {monolith_code.count(chr(10)) + 1}-Line app.py",
@@ -1392,6 +1475,32 @@ with st.sidebar:
                 st.session_state.pop(k, None)
             st.rerun()
 
+    with st.expander("🐙 GitHub Explorer"):
+        st.caption("Search public repositories by language, topic, or project name.")
+        github_query = st.text_input("Repository search", placeholder="e.g. streamlit AI assistant", key="void_github_query")
+        if st.button("Search GitHub", key="void_github_search", use_container_width=True):
+            results, err = github_search_repositories(github_query, 6)
+            st.session_state["void_github_results"] = results
+            st.session_state["void_github_error"] = err or ""
+        if st.session_state.get("void_github_error"):
+            st.warning(st.session_state["void_github_error"])
+        for repo in st.session_state.get("void_github_results", []):
+            st.markdown(f"**[{esc(repo['name'])}]({repo['url']})**")
+            st.caption(f"{repo['stars']:,} stars · {esc(repo['language'])} · updated {esc(repo['updated'])}")
+            st.write(repo["description"])
+
+    with st.expander("✉️ Email Center"):
+        st.caption("Uses SMTP settings from Streamlit secrets or environment variables.")
+        email_to = st.text_input("Recipient", placeholder="name@example.com", key="void_email_to")
+        email_subject = st.text_input("Subject", key="void_email_subject")
+        email_body = st.text_area("Message", height=110, key="void_email_body")
+        if st.button("Send Email", key="void_email_send", type="primary", use_container_width=True):
+            sent, message = send_smtp_email(email_to, email_subject, email_body)
+            if sent:
+                st.success(message)
+            else:
+                st.error(message)
+
 
 # ============================== 9. COMMAND BAR & HELPERS ==============================
 uploaded_file, file_context = None, ""
@@ -1405,7 +1514,7 @@ with c1:
             "⚡ Live Web App & Game Studio",
             "🛠️ Side-by-Side Code Lab & Sandbox",
             "📊 Data Intelligence & Chart Forge",
-            "🧬 Self-Evolution Lab & 5,000-Line Compiler",
+            "🧬 Self-Evolution Lab & Source Export",
             "🛰️ Ship Telemetry & Insights",
             "🩺 Engine Doctor & Live Test",
         ],
@@ -1665,7 +1774,7 @@ elif ui_mode == "📊 Data Intelligence & Chart Forge":
         st.area_chart(df.select_dtypes(include="number"), height=260)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-elif ui_mode == "🧬 Self-Evolution Lab & 5,000-Line Compiler":
+elif ui_mode == "🧬 Self-Evolution Lab & Source Export":
     with st.container(border=True):
         st.markdown("### ⚡ 1-Click 5,050-Line Monolith Compiler")
         monolith_str = build_5000_line_monolith(5050)
