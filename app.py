@@ -3593,16 +3593,117 @@ def generate_interactive_slides_html(
       for l in lines[1:]
       if l.strip()
     )
-    cls = "slide on" if i == 0 else "slide"
+   cls = "slide on" if i == 0 else "slide"
     slides_html.append(
-      f'<div class="{cls}">'
-      f'<div class="badge">'
-      f"VOID PRISM — SLIDE {i + 1} OF {len(secs)}"
-      f"</div>"
-      f"<h2>{h}</h2>"
-      f'<div class="body">{body}</div>'
-      f"</div>"
-  tpl = [
+        f'<div class="{cls}">'
+        f'<div class="badge">'
+        f"VOID PRISM — "
+        f"SLIDE {i + 1} OF {len(secs)}"
+        f"</div>"
+        f"<h2>{h}</h2>"
+        f'<div class="body">'
+        f"{body}"
+        f"</div>"
+        f"</div>"
+    )
+    tpl = [
+        "<!DOCTYPE html>",
+        "<html>",
+        "<head>",
+        '<meta charset="utf-8">',
+        "<style>",
+        "body {",
+        "  margin: 0;",
+        "  background: #060913;",
+        "  color: #F8FAFC;",
+        "  font-family: sans-serif;",
+        "  display: flex;",
+        "  flex-direction: column;",
+        "  height: 95vh;",
+        "  justify-content: space-between;",
+        "}",
+        ".wrap {",
+        "  flex: 1;",
+        "  display: flex;",
+        "  align-items: center;",
+        "  justify-content: center;",
+        "  padding: 18px;",
+        "}",
+        ".slide {",
+        "  display: none;",
+        "  width: 100%;",
+        "  max-width: 820px;",
+        "  background: #0C1324;",
+        "  border: 1px solid #38BDF8;",
+        "  border-radius: 18px;",
+        "  padding: 34px 42px;",
+        "  min-height: 300px;",
+        "  box-sizing: border-box;",
+        "}",
+        ".slide.on {",
+        "  display: block;",
+        "}",
+        ".badge {",
+        "  font-size: 10px;",
+        "  letter-spacing: 2px;",
+        "  color: #38BDF8;",
+        "  font-weight: 700;",
+        "  margin-bottom: 12px;",
+        "}",
+        "h2 {",
+        "  margin-top: 0;",
+        "  color: #FFFFFF;",
+        "}",
+        ".body {",
+        "  font-size: 15px;",
+        "  line-height: 1.75;",
+        "  color: #CBD5E1;",
+        "}",
+        ".ctl {",
+        "  display: flex;",
+        "  justify-content: center;",
+        "  gap: 12px;",
+        "  padding: 10px;",
+        "}",
+        "button {",
+        "  background: #111B33;",
+        "  color: #FFFFFF;",
+        "  border: 1px solid #38BDF8;",
+        "  padding: 8px 20px;",
+        "  border-radius: 99px;",
+        "  cursor: pointer;",
+        "  font-weight: 600;",
+        "}",
+        "</style>",
+        "</head>",
+        "<body>",
+        '<div class="wrap">',
+        "".join(slides_html),
+        "</div>",
+        '<div class="ctl">',
+        '<button onclick="go(-1)">',
+        "◀ Prev",
+        "</button>",
+        '<button onclick="window.print()">',
+        "🖨️ Print",
+        "</button>",
+        '<button onclick="go(1)">',
+        "Next ▶",
+        "</button>",
+        "</div>",
+        "<script>",
+        "let c = 0;",
+        "const s = document.querySelectorAll('.slide');",
+        "function go(d) {",
+        "  s[c].classList.remove('on');",
+        "  c = (c + d + s.length) % s.length;",
+        "  s[c].classList.add('on');",
+        "}",
+        "</script>",
+        "</body>",
+        "</html>",
+    ]
+    return "\n".join(tpl)
     "<!DOCTYPE html>",
     "<html>",
     "<head>",
