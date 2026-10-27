@@ -1990,8 +1990,7 @@ if "user_email" not in st.session_state:
         '<div class="void-gradient">VOID HYPERION</div>'
         '<div class="void-sub">Sovereign OS Intelligence · Multi-Model Verification · Live Research & Prism Forge</div></div>',
         unsafe_allow_html=True,
-    )
-_, mid, _ = st.columns([1, 1.35, 1])
+    )_, mid, _ = st.columns([1, 1.35, 1])
         with mid:
             st.markdown("<p style='text-align:center; color:#6B6B74; font-size:.83rem; margin-bottom:14px;'>"
                         "Ask anything to begin as a guest — no account needed</p>", unsafe_allow_html=True)
