@@ -3787,15 +3787,14 @@ def generate_interactive_slides_html(
     title,
     markdown,
 ):
-  secs = [
-  secs = [
-    s
-    for s in re.split(
-      r"(?m)^(?=#{1,2} )",
-      markdown.strip(),
-    )
-    if s.strip()
-  ]
+    secs = [
+        s
+        for s in re.split(
+            r"(?m)^(?=#{1,2} )",
+            markdown.strip(),
+        )
+        if s.strip()
+    ]
   if len(secs) <= 1:
     paras = [
       p.strip()
