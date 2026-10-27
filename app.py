@@ -1991,18 +1991,31 @@ if "user_email" not in st.session_state:
         '<div class="void-sub">Sovereign OS Intelligence · Multi-Model Verification · Live Research & Prism Forge</div></div>',
         unsafe_allow_html=True,
     )
+_, mid, _ = st.columns([1, 1.35, 1])
+        with mid:
+            st.markdown("<p style='text-align:center; color:#6B6B74; font-size:.83rem; margin-bottom:14px;'>"
+                        "Ask anything to begin as a guest — no account needed</p>", unsafe_allow_html=True)
+            with st.form("landing_search_form"):
+                landing_query = st.text_input("Direct Search / Prompt", placeholder="Ask a question, paste code, or describe what to build",
+                                              label_visibility="collapsed")
+                col_search_btn, col_guest_btn = st.columns(2)
+                with col_search_btn:
+                    search_submit = st.form_submit_button("Ask VOID", type="primary", use_container_width=True)
+                with col_guest_btn:
+                    guest_submit = st.form_submit_button("Enter Guest Mode", use_container_width=True)
 
-    _, mid, _ = st.columns([1, 1.45, 1])
-    with mid:
-        with st.form("landing_search_form"):
-            st.markdown("##### ⚡ Instant Sovereign Access")
-            landing_query = st.text_input(
-                "Direct Search / Prompt",
-                placeholder="Ask a question, paste code, or describe what to build…",
-                label_visibility="collapsed",
-            )
-            col_search_btn, col_guest_btn = st.columns(2)
-            with col_search_btn:
+                if search_submit or guest_submit:
+                    guest_email = f"guest_{uuid.uuid4().hex[:6]}@void.os"
+                    ensure_user(guest_email, name="Guest Operator")
+                    st.session_state.user_email = guest_email
+                    remember_login(guest_email)
+                    if search_submit and landing_query.strip():
+                        cid = list(db["chats"][guest_email].keys())[-1]
+                        db["chats"][guest_email][cid]["messages"].append({"role": "user", "content": landing_query.strip()})
+                        t = landing_query.strip().replace("\n", " ")
+                        db["chats"][guest_email][cid]["title"] = t[:26] + "..." if len(t) > 26 else t
+                        save_db(db)
+                    st.rerun()
               # ============================== 8. AUTHENTICATION GATE ==============================
 if "user_email" not in st.session_state:
     restored = restore_login()
