@@ -3773,7 +3773,7 @@ def generate_interactive_slides_html(
     "}",
     "</style>",
     "</head>",
-   f'<div class="wrap">{"".join(slides_html)}</div>',
+    f'<div class="wrap">{"".join(slides_html)}</div>',
     '<div class="ctl">',
     '<button onclick="go(-1)">◀ Prev</button>',
     '<button onclick="window.print()">Export to PDF</button>',
