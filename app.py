@@ -1985,12 +1985,13 @@ if "user_email" not in st.session_state:
         st.session_state.user_email = restored
 
 if "user_email" not in st.session_state:
-    st.markdown(
-        f'<div class="void-hero"><div class="hero-mark"><img src="{LOGO_B64}" width="42"/></div>'
-        '<div class="void-gradient">VOID HYPERION</div>'
-        '<div class="void-sub">Sovereign OS Intelligence · Multi-Model Verification · Live Research & Prism Forge</div></div>',
-        unsafe_allow_html=True,
-    _, mid, _ = st.columns([1, 1.35, 1])
+        st.markdown(
+            f'<div class="void-hero"><div class="hero-mark"><img src="{LOGO_B64}" width="42"/></div>'
+            '<div class="void-gradient">VOID HYPERION</div>'
+            '<div class="void-sub">Sovereign OS Intelligence · Multi-Model Verification · Live Research & Prism Forge</div></div>',
+            unsafe_allow_html=True,
+        )
+        _, mid, _ = st.columns([1, 1.35, 1])
         with mid:
             st.markdown("<p style='text-align:center; color:#6B6B74; font-size:.83rem; margin-bottom:14px;'>"
                         "Ask anything to begin as a guest — no account needed</p>", unsafe_allow_html=True)
