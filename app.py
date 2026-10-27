@@ -2032,7 +2032,7 @@ if "user_email" not in st.session_state:
 
     _, mid, _ = st.columns([1, 1.45, 1])
     with mid:
-        with st.form("landing_search_form"):
+       with st.form("landing_search_form_alt"):
             st.markdown("##### ⚡ Instant Sovereign Access")
             landing_query = st.text_input(
                 "Direct Search / Prompt",
