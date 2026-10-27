@@ -3779,7 +3779,6 @@ def generate_interactive_slides_html(
     '<button onclick="window.print()">Export to PDF</button>',
     '<button onclick="go(1)">Next ▶</button>',
     "</div>",
-)
 return "\n".join(out)
 
 
