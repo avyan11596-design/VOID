@@ -552,7 +552,53 @@ DEFAULT_PREFS = {
     "domain": "General", "depth": "Maximum Power", "research": "Standard",
     "temperature": 0.25, "max_tokens": 3200, "voice": "Google UK English Female",
     "reply_length": "Balanced", "custom_instructions": "",
+    "speed": "Balanced",  # Turbo (fastest) | Balanced | Maximum Power (verified)
+    "vault_context": True,
 }
+
+# Categorized navigation — every tool lives in exactly one category to keep the UI uncluttered
+NAV = {
+    "💬 Chat & Intelligence": [
+        "✦ VOID Core (Adaptive Chat)", "🌐 Polyglot Language Lab",
+        "🩺 Expert Domain Suite", "🧠 Adaptive Learning Lab",
+    ],
+    "🗂️ Personal Vault": [
+        "🔎 My Files & Photos", "🗂️ File & Photo Factory",
+    ],
+    "🎨 Create & Forge": [
+        "🎨 Creative Studio", "📚 Codex & App Forge",
+    ],
+    "📅 Life & Live Data": [
+        "📅 Life Command Deck", "📡 Live Data Hub", "📰 Newsroom",
+    ],
+    "🛡️ Control Center": [
+        "🛡️ Security & Ethics Center", "⚙️ Customization Center", "🩺 Engine Doctor & Telemetry",
+    ],
+}
+NAV_INDEX = {tool: cat for cat, tools in NAV.items() for tool in tools}
+
+# Spotlight-search keywords so operators can find tools by concept, not just display name
+NAV_ALIASES = {
+    "✦ VOID Core (Adaptive Chat)": "chat talk ask question conversation assistant main home",
+    "🌐 Polyglot Language Lab": "translate translation language languages hindi tamil polyglot bhasha",
+    "🩺 Expert Domain Suite": "medical doctor medicine law legal engineering finance psychologist expert advice",
+    "🧠 Adaptive Learning Lab": "learning model training feedback brain stats memory teach",
+    "🔎 My Files & Photos": "vault documents document upload search my files photos photo images pictures gallery",
+    "🗂️ File & Photo Factory": "vault create make generate build produce files photos documents csv json pdf png svg music",
+    "🎨 Creative Studio": "art music midi story song image picture creative drawing compose write",
+    "📚 Codex & App Forge": "study notes pdf slides flashcards game app html code lab school",
+    "📅 Life Command Deck": "appointment schedule calendar reminder task tasks email booking book",
+    "📡 Live Data Hub": "weather stock stocks crypto bitcoin market forex currency data live price",
+    "📰 Newsroom": "news headlines msn al jazeera bbc times hindu newspaper current affairs feeds",
+    "🛡️ Security & Ethics Center": "security privacy redaction injection audit safety ethics encryption pii",
+    "⚙️ Customization Center": "settings preferences theme customization options config font voice speed",
+    "🩺 Engine Doctor & Telemetry": "diagnostics diagnostic test engine health status telemetry logs keys",
+}
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "void_assets")
+TEXT_EXT = (".txt", ".md", ".csv", ".json", ".log", ".py", ".js", ".html", ".css", ".xml", ".yaml", ".yml", ".ini", ".cfg", ".ts", ".sql")
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")
+VAULT_QUERY_RE = re.compile(r"(?i)\b(my files|my photos|my vault|my documents|search (?:my|the) (?:files|photos|vault)|@vault)\b")
 
 
 def load_db():
@@ -2139,6 +2185,312 @@ def build_ics(appointments, user_name="VOID Operator"):
     lines.append("END:VCALENDAR")
     return "\r\n".join(lines).encode("utf-8")
 
+# ============================== 14B. PERSONAL VAULT (FILE/PHOTO UPLOAD · INDEX · SEARCH) ==============================
+def user_asset_dir(email: str):
+    folder = os.path.join(ASSETS_DIR, hashlib.sha256(email.encode()).hexdigest()[:16])
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def extract_file_text(name: str, data: bytes):
+    """Extract searchable text from common file types. Returns (text, note)."""
+    low = name.lower()
+    if low.endswith(TEXT_EXT):
+        try:
+            return data.decode("utf-8", errors="ignore")[:200000], "text indexed"
+        except Exception:
+            return "", "binary or unreadable"
+    if low.endswith(".docx"):
+        try:
+            import zipfile
+            with zipfile.ZipFile(__import__("io").BytesIO(data)) as z:
+                xml = z.read("word/document.xml").decode("utf-8", errors="ignore")
+            txt = re.sub(r"</w:p>", "\n", xml)
+            txt = re.sub(r"<[^>]+>", "", txt)
+            return html.unescape(txt)[:200000], "Word document indexed"
+        except Exception:
+            return "", "docx unreadable (content search limited to name/tags)"
+    if low.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader  # optional dependency
+            import io as _io
+            reader = PdfReader(_io.BytesIO(data))
+            txt = "\n".join((p.extract_text() or "") for p in reader.pages[:40])
+            return txt[:200000], f"PDF indexed ({min(len(reader.pages), 40)} pages)"
+        except Exception:
+            return "", "install pypdf for PDF content search (name/tags still indexed)"
+    return "", "binary file — name and tags indexed"
+
+
+def image_dimensions(data: bytes):
+    """Read PNG/JPEG/GIF dimensions with stdlib only."""
+    try:
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            w, h = struct.unpack(">II", data[16:24])
+            return w, h
+        if data[:6] in (b"GIF87a", b"GIF89a"):
+            w, h = struct.unpack("<HH", data[6:10])
+            return w, h
+        if data[:2] == b"\xff\xd8":  # JPEG: walk markers to SOF
+            i = 2
+            while i < len(data) - 9:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                if marker in (0xC0, 0xC1, 0xC2):
+                    h, w = struct.unpack(">HH", data[i + 5:i + 9])
+                    return w, h
+                length = struct.unpack(">H", data[i + 2:i + 4])[0]
+                i += 2 + length
+    except Exception:
+        pass
+    return None, None
+
+
+def add_vault_entry(user_record, email: str, uploaded, tags: str = ""):
+    data = uploaded.getvalue()
+    name = getattr(uploaded, "name", "file")
+    entry_id = uuid.uuid4().hex[:10]
+    low = name.lower()
+    kind = "image" if low.endswith(IMAGE_EXT) else ("document" if low.endswith(TEXT_EXT + (".docx", ".pdf")) else "other")
+    folder = user_asset_dir(email)
+    disk_name = f"{entry_id}_{safe_name(name, 60)}"
+    with open(os.path.join(folder, disk_name), "wb") as f:
+        f.write(data)
+    text, note = extract_file_text(name, data)
+    w, h = image_dimensions(data) if kind == "image" else (None, None)
+    entry = {
+        "id": entry_id, "name": name[:160], "kind": kind, "size": len(data),
+        "path": os.path.join(folder, disk_name), "tags": [t.strip().lower() for t in re.split(r"[,#]", tags) if t.strip()][:20],
+        "caption": "", "index_text": text, "note": note,
+        "width": w, "height": h, "uploaded": datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
+    }
+    user_record.setdefault("vault", []).insert(0, entry)
+    return entry
+
+
+def search_vault(entries, query: str, k: int = 12):
+    """Weighted TF search over names, tags, captions and extracted content. Returns ranked hits with snippets."""
+    q_tokens = [t for t in tokenize(query) if len(t) > 1]
+    if not q_tokens:
+        return []
+    hits = []
+    for e in entries:
+        name_tokens = tokenize(e.get("name", ""))
+        tag_tokens = tokenize(" ".join(e.get("tags", [])))
+        cap_tokens = tokenize(e.get("caption", ""))
+        body_tokens = tokenize(e.get("index_text", ""))
+        score = 0
+        matched = set()
+        for qt in q_tokens:
+            n = name_tokens.count(qt)
+            if n:
+                score += 6 * n
+                matched.add(qt)
+            n = tag_tokens.count(qt)
+            if n:
+                score += 5 * n
+                matched.add(qt)
+            n = cap_tokens.count(qt)
+            if n:
+                score += 4 * n
+                matched.add(qt)
+            n = body_tokens.count(qt)
+            if n:
+                score += min(n, 8)
+                matched.add(qt)
+            # substring fallback catches partial word and filename matches
+            if score == 0 and any(qt in tok for tok in name_tokens):
+                score += 3
+                matched.add(qt)
+        if score > 0:
+            hits.append((score, len(matched), e))
+    hits.sort(key=lambda x: (-x[0], -x[1]))
+    return [e for _, _, e in hits[:k]]
+
+
+def vault_snippet(entry, query: str, width: int = 220):
+    q_tokens = [t for t in tokenize(query) if len(t) > 1]
+    haystack = entry.get("index_text") or entry.get("caption") or entry.get("name", "")
+    low = haystack.lower()
+    pos = next((low.find(qt) for qt in q_tokens if qt in low), -1)
+    if pos < 0:
+        snippet = haystack[:width]
+    else:
+        start = max(0, pos - width // 3)
+        snippet = ("…" if start else "") + haystack[start:start + width] + ("…" if start + width < len(haystack) else "")
+    for qt in sorted(set(q_tokens), key=len, reverse=True):
+        snippet = re.sub(rf"(?i)\b({re.escape(qt)})", r"**\1**", snippet)
+    return snippet
+
+
+def vault_context_block(entries, query: str, limit: int = 5):
+    """Compact context block injected into a chat prompt when the operator asks about their own files."""
+    hits = search_vault(entries, query, limit)
+    if not hits:
+        return ""
+    lines = ["[OPERATOR'S PERSONAL VAULT MATCHES — cite these files by name in your answer]"]
+    for e in hits:
+        detail = vault_snippet(e, query, 160).replace("**", "")
+        lines.append(f"- {e['name']} ({e['kind']}, tags: {', '.join(e['tags']) or 'none'}): {detail}")
+    return "\n".join(lines)
+
+
+# ============================== 14C. NEWSROOM ENGINE (NAMED PUBLISHER RSS FEEDS) ==============================
+NEWS_SOURCES = {
+    "🟦 MSN News": ("https://news.google.com/rss/search?q=site%3Amsn.com+when%3A3d&hl=en-IN&gl=IN&ceid=IN:en", "Aggregator (MSN articles)"),
+    "🟠 Al Jazeera": ("https://www.aljazeera.com/xml/rss/all.xml", "Direct publisher feed"),
+    "🇮🇳 BBC News India": ("http://feeds.bbci.co.uk/news/world/asia/india/rss.xml", "Direct publisher feed"),
+    "🌍 BBC World": ("http://feeds.bbci.co.uk/news/world/rss.xml", "Direct publisher feed"),
+    "📰 Google News India": ("https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en", "Aggregator"),
+    "🏏 Times of India": ("https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms", "Direct publisher feed"),
+    "🪔 The Hindu": ("https://www.thehindu.com/news/national/feeder/default.rss", "Direct publisher feed"),
+    "💹 Economic Times Markets": ("https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms", "Direct publisher feed"),
+    "💻 TechCrunch": ("https://techcrunch.com/feed/", "Direct publisher feed"),
+    "🏏 ESPNcricinfo": ("https://www.espncricinfo.com/rss/content/story/feeds/0.xml", "Direct publisher feed"),
+    "🔎 Bing News": ("https://www.bing.com/news/search?q={q}&format=RSS&setlang=en-in", "Search feed (query-based)"),
+}
+NEWS_CATEGORIES = {
+    "Top headlines": "",
+    "India": "India",
+    "World": "world news",
+    "Technology": "technology",
+    "Business & Markets": "business stock market",
+    "Sports": "sports",
+    "Science": "science",
+    "Health": "health medicine",
+    "Entertainment": "entertainment movies",
+}
+
+
+@st.cache_data(ttl=600, show_spinner=False, max_entries=64)
+def fetch_rss_feed(url: str, n: int = 10):
+    try:
+        r = requests.get(url, headers=_DDG_HEADERS, timeout=12)
+        r.raise_for_status()
+        root = ET.fromstring(r.content)
+        out = []
+        for item in root.findall(".//item")[:n]:
+            title = _strip_tags(item.findtext("title", ""))
+            link = (item.findtext("link", "") or "").strip()
+            pub = (item.findtext("pubDate", "") or "").strip()
+            desc = _strip_tags(item.findtext("description", ""))[:240]
+            if title and link.startswith(("http://", "https://")):
+                out.append({"title": title, "link": link, "published": pub, "summary": desc})
+        return out
+    except Exception:
+        return []
+
+
+def newsroom_fetch(selected, category: str, query: str, per_source: int = 8):
+    jobs = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for name in selected:
+            url, kind = NEWS_SOURCES[name]
+            if "{q}" in url:
+                q = urllib.parse.quote((query or category or "India").strip()[:120])
+                url = url.format(q=q)
+            elif category and name.startswith(("🔎", "📰", "🟦")):
+                # Aggregator/search feeds accept a category-constrained Google News query
+                q = urllib.parse.quote(f"{category} when:3d")
+                if name.startswith("🟦"):
+                    url = f"https://news.google.com/rss/search?q=site%3Amsn.com+{q}&hl=en-IN&gl=IN&ceid=IN:en"
+                elif name.startswith("📰"):
+                    url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
+            jobs[ex.submit(fetch_rss_feed, url, per_source)] = name
+        collected = []
+        for fut in jobs:
+            for item in fut.result():
+                item["source"] = jobs[fut]
+                collected.append(item)
+    # Deduplicate by normalized title, newest-first best effort
+    seen, dedup = set(), []
+    for item in collected:
+        sig = re.sub(r"\W+", "", item["title"].lower())[:80]
+        if sig not in seen:
+            seen.add(sig)
+            dedup.append(item)
+    return dedup[: per_source * max(1, len(selected))]
+
+
+# ============================== 14D. FILE & PHOTO FACTORY ==============================
+FACTORY_KINDS = {
+    "📝 Text (.txt)": "txt", "📄 Markdown (.md)": "md", "📊 CSV spreadsheet (.csv)": "csv",
+    "🔣 JSON data (.json)": "json", "🌐 Web page (.html)": "html", "📕 PDF document (.pdf)": "pdf",
+    "🖼️ AI photo (.png)": "png", "🧊 Vector graphic (.svg)": "svg", "🎵 MIDI music (.mid)": "mid",
+    "🔊 Audio preview (.wav)": "wav",
+}
+
+
+def build_factory_file(kind: str, spec: str, engine_choice: str, diag=None):
+    """Generate a downloadable file from a natural-language spec. Returns (filename, bytes, mime, note) or raises."""
+    stamp = datetime.now(IST).strftime("%Y%m%d_%H%M")
+    base = safe_name(spec, 30) or "void_file"
+    if kind in ("txt", "md", "csv", "json", "html"):
+        strict = {
+            "csv": "Output ONLY valid CSV: a header row then data rows, commas quoted when needed. No prose, no code fences.",
+            "json": "Output ONLY valid minified JSON (no markdown, no code fences, no commentary).",
+            "html": "Output ONLY one complete self-contained HTML5 document with inline <style> and <script>, inside a ```html block.",
+            "md": "Output clean Markdown only, no code fences around the whole document.",
+            "txt": "Output plain text only, no markdown symbols.",
+        }[kind]
+        out, err = call_llm(engine_choice, f"You are VOID's File Factory. {strict}",
+                            [{"role": "user", "content": spec[:1800]}], 0.35, 3000, prompt=spec, diag=diag)
+        if not out:
+            raise EngineError(err or "Engine returned no content.")
+        m = re.search(r"```(?:html)?\s*\n(.*?)```", out, re.DOTALL)
+        if m and kind == "html":
+            out = m.group(1).strip()
+        out = out.strip()
+        if kind == "json":
+            json.loads(out)  # validate or raise
+        if kind == "csv":
+            rows = [r for r in csv_simple_parse(out)]
+            if len(rows) < 2:
+                raise EngineError("Generated CSV had no data rows.")
+        return f"{base}_{stamp}.{kind}", out.encode("utf-8"), "text/plain", "generated by LLM"
+    if kind == "pdf":
+        out, err = call_llm(engine_choice, "You are VOID's document writer. Produce well-structured Markdown with # headings and bullet points.",
+                            [{"role": "user", "content": spec[:1800]}], 0.3, 3000, prompt=spec, diag=diag)
+        if not out:
+            raise EngineError(err or "Engine returned no content.")
+        return f"{base}_{stamp}.pdf", generate_real_pdf_bytes(spec[:60], out, "VOID File Factory"), "application/pdf", "rendered natively"
+    if kind == "png":
+        img, _u = pollinations_image(spec, 1024, 1024)
+        if not img:
+            raise EngineError("Art gateway unreachable right now — try SVG instead or retry shortly.")
+        return f"{base}_{stamp}.png", img, "image/png", "diffusion photo"
+    if kind == "svg":
+        svg = procedural_svg_art(spec)
+        return f"{base}_{stamp}.svg", svg.encode("utf-8"), "image/svg+xml", "offline vector art"
+    if kind in ("mid", "wav"):
+        maker = MidiMaker(60, 96).compose("cinematic", "pentatonic", 4)
+        if kind == "mid":
+            return f"{base}_{stamp}.mid", maker.bytes(), "audio/midi", "two-track MIDI"
+        return f"{base}_{stamp}.wav", melody_to_wav(maker.melody, 96), "audio/wav", "synthesized preview"
+    raise EngineError(f"Unknown factory kind: {kind}")
+
+
+def csv_simple_parse(text: str):
+    """Tiny CSV row splitter tolerant of quoted commas (used for validation)."""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row, cell, in_q = [], [], False
+        for ch in line:
+            if ch == '"':
+                in_q = not in_q
+            elif ch == "," and not in_q:
+                row.append("".join(cell).strip())
+                cell = []
+            else:
+                cell.append(ch)
+        row.append("".join(cell).strip())
+        yield row
+
+
 # ============================== 15. AUTHENTICATION GATE (OTP LOCKOUT · RATE LIMITED) ==============================
 if "user_email" not in st.session_state:
     restored = restore_login()
@@ -2266,6 +2618,29 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # ----- Categorized navigation with quick tool search -----
+    if "nav_tool" not in st.session_state or st.session_state.nav_tool not in NAV_INDEX:
+        st.session_state.nav_tool = "✦ VOID Core (Adaptive Chat)"
+    tool_query = st.text_input("🔎 Search tools", placeholder="Type to filter all 14 tools…", label_visibility="collapsed").strip().lower()
+    if tool_query:
+        matches = [t for t in NAV_INDEX if tool_query in t.lower() or tool_query in NAV_ALIASES.get(t, "")]
+        if matches:
+            st.session_state.nav_tool = st.radio("Matching tools", matches,
+                                                  index=matches.index(st.session_state.nav_tool) if st.session_state.nav_tool in matches else 0,
+                                                  label_visibility="collapsed")
+        else:
+            st.caption("No tools match — showing current.")
+    else:
+        active_cat = NAV_INDEX.get(st.session_state.nav_tool, "💬 Chat & Intelligence")
+        nav_cat = st.selectbox("Category", list(NAV.keys()), index=list(NAV.keys()).index(active_cat))
+        st.session_state.nav_tool = st.radio(
+            "Tool", NAV[nav_cat],
+            index=NAV[nav_cat].index(st.session_state.nav_tool) if st.session_state.nav_tool in NAV[nav_cat] else 0,
+            label_visibility="collapsed",
+        )
+    ui_mode = st.session_state.nav_tool
+    st.markdown(f"<div class='meta-line'>{esc(NAV_INDEX.get(ui_mode, ''))}</div>", unsafe_allow_html=True)
+
     if st.button("➕ New Session", type="primary", use_container_width=True):
         st.session_state.current_chat_id = new_chat(user_email)
         st.session_state.active_prism_text = None
@@ -2354,25 +2729,8 @@ with st.sidebar:
 
 
 # ============================== 17. COMMAND BAR, SYSTEM PROMPT & PIPELINE HELPERS ==============================
-c1, c2, c3 = st.columns([2.1, 1.6, 1.5])
-with c1:
-    ui_mode = st.selectbox(
-        "Dimension",
-        [
-            "✦ VOID Core (Adaptive Chat)",
-            "🌐 Polyglot Language Lab",
-            "🩺 Expert Domain Suite",
-            "🎨 Creative Studio",
-            "📅 Life Command Deck",
-            "📡 Live Data Hub",
-            "🧠 Adaptive Learning Lab",
-            "🛡️ Security & Ethics Center",
-            "⚙️ Customization Center",
-            "📚 Codex & App Forge",
-            "🩺 Engine Doctor & Telemetry",
-        ],
-        label_visibility="collapsed",
-    )
+# ui_mode is now driven by the categorized sidebar navigation (see section 16)
+c2, c3 = st.columns(2)
 with c2:
     engine_idx = list(ENGINES.keys()).index(prefs["engine"]) if prefs["engine"] in ENGINES else len(ENGINES) - 1
     cosmic_entity = st.selectbox("Cosmic Engine", list(ENGINES), label_visibility="collapsed", index=engine_idx)
@@ -2434,10 +2792,10 @@ def send_to_prism(text, title):
 
 
 def bump_usage():
+    # Mutates only; the caller persists once at the end (fewer disk writes = faster reruns)
     user_record["prompts"] = user_record.get("prompts", 0) + 1
     user_record["last_active"] = datetime.now(IST).strftime("%b %d, %H:%M")
     bump_daily_usage()
-    save_db(db)
 
 
 def diag_html(diag):
@@ -2468,10 +2826,13 @@ with st.popover("⚙️ Attach & Tune this Session", use_container_width=True):
     if uploaded_file:
         file_context = uploaded_file.getvalue().decode("utf-8", errors="ignore")[:MAX_FILE_CHARS]
         st.success(f"Loaded `{uploaded_file.name}`")
+    speed_mode = st.radio("⚡ Speed", ["Turbo", "Balanced", "Maximum Power"],
+                          index=["Turbo", "Balanced", "Maximum Power"].index(prefs["speed"]) if prefs["speed"] in ("Turbo", "Balanced", "Maximum Power") else 1,
+                          help="Turbo: fastest, no verification/research unless the question needs fresh news. Maximum Power: deep research + cross-model verification.")
     task_depth = st.select_slider("Depth", ["Swift", "Balanced", "Maximum Power"],
                                   value=prefs["depth"] if prefs["depth"] in ("Swift", "Balanced", "Maximum Power") else "Maximum Power")
     research_depth = st.select_slider("Live Research", ["Off", "Standard", "Deep"], value=prefs["research"])
-    accuracy_mode = st.toggle("Verified Answer Mode", value=True)
+    accuracy_mode = st.toggle("Verified Answer Mode", value=(speed_mode != "Turbo"))
     temperature = st.slider("Creativity", 0.0, 1.0, float(prefs["temperature"]), 0.05)
     max_tokens = st.slider("Max Output", 500, 4000, int(prefs["max_tokens"]), 100)
     if hasattr(st, "audio_input"):
@@ -2487,6 +2848,8 @@ with st.popover("⚙️ Attach & Tune this Session", use_container_width=True):
                 st.warning(err)
     else:
         st.caption("Upgrade Streamlit to ≥1.46 for microphone input.")
+    # Session-level speed override feeds the pipeline (saved permanently via Customization Center)
+    prefs["speed"] = speed_mode
 
 
 def run_void_pipeline(active_prompt: str, chat_holder):
@@ -2515,9 +2878,36 @@ def run_void_pipeline(active_prompt: str, chat_holder):
         redacted, hits = redact_pii(active_prompt)
         if hits:
             audit(db, "pii_redacted", "info", ",".join(hits), user_email)
-    emotion_info = detect_emotion(active_prompt)
-    lang_code, lang_conf = detect_language(active_prompt)
-    intent_label, intent_conf, _ = brain.classify_intent(active_prompt)
+
+    # Speed policy: Turbo skips research (unless the query clearly needs fresh data) and verification
+    speed = prefs.get("speed", "Balanced")
+    effective_research = research_depth
+    do_verify = accuracy_mode
+    if speed == "Turbo":
+        effective_research = "Standard" if is_current_query(redacted) else "Off"
+        do_verify = False
+    elif speed == "Maximum Power":
+        effective_research = "Deep" if research_depth != "Off" else "Off"
+        do_verify = accuracy_mode
+
+    # Personal-vault search runs only when the operator explicitly asks about their own files/photos
+    vault_block = ""
+    if prefs.get("vault_context", True) and VAULT_QUERY_RE.search(active_prompt):
+        vault_block = vault_context_block(user_record.get("vault", []), active_prompt)
+
+    # Parallel: emotion, language, grounding and intent classification run concurrently
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_emo = pool.submit(detect_emotion, active_prompt)
+        f_lang = pool.submit(detect_language, active_prompt)
+        f_ground = pool.submit(grounding, redacted, effective_research)
+        f_intent = pool.submit(brain.classify_intent, active_prompt)
+        f_few = pool.submit(brain.few_shot, redacted, user_chats)
+        emotion_info = f_emo.result()
+        lang_code, lang_conf = f_lang.result()
+        intent_label, intent_conf, _ = f_intent.result()
+        warm = f_ground.result()
+        few = f_few.result()
+
     brain.record_interaction(active_prompt, emotion_info["label"], intent_label)
     user_record.setdefault("mood_log", []).append({"ts": datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
                                                     "label": emotion_info["label"], "emoji": emotion_info["emoji"],
@@ -2526,26 +2916,29 @@ def run_void_pipeline(active_prompt: str, chat_holder):
     user_record.setdefault("recent_topics", []).insert(0, {"t": active_prompt[:80], "ts": datetime.now(IST).strftime("%b %d %H:%M"),
                                                             "emotion": emotion_info["label"], "lang": lang_code})
     user_record["recent_topics"] = user_record["recent_topics"][:30]
-    few = brain.few_shot(active_prompt, user_chats)
+    if vault_block:
+        warm = (warm + "\n\n" + vault_block) if warm else vault_block
     diag = {"emotion": emotion_info["label"], "emotion_emoji": emotion_info["emoji"],
             "language": lang_code, "lang_conf": lang_conf, "intent": intent_label,
-            "intent_conf": intent_conf, "redactions": hits, "learned": bool(few)}
-    with st.spinner("Grounding live sources · reading emotion · adapting memory…"):
-        warm = grounding(redacted, research_depth, diag)
+            "intent_conf": intent_conf, "redactions": hits, "learned": bool(few),
+            "speed": speed, "vault_hits": vault_block.count("\n- ") if vault_block else 0}
+    with st.spinner(f"{speed} mode · synthesizing…"):
         diag["_context"] = warm
         sys_p = build_system_prompt(redacted, detect_prism_intent(active_prompt), grounded_context=warm,
                                     emotion_info=emotion_info, lang_code=lang_code, few_shot=few)
-        reply = None
-        if accuracy_mode:
-            reply = answer_question(cosmic_entity, redacted, sys_p, current_chat["messages"], temperature, max_tokens, True, research_depth, True, diag)
+        if do_verify:
+            reply = answer_question(cosmic_entity, redacted, sys_p, current_chat["messages"], temperature, max_tokens, True, effective_research, True, diag)
         else:
-            raw = st.write_stream(stream_llm(cosmic_entity, sys_p, current_chat["messages"], temperature, max_tokens, redacted, diag))
-            reply = raw if isinstance(raw, str) else "".join(map(str, raw or []))
+            reply, err = call_llm(cosmic_entity, sys_p, current_chat["messages"], temperature, max_tokens, prompt=redacted, diag=diag)
+            if not reply:
+                raise EngineError(err or "No reply")
+            if reply.count("```") % 2 != 0:
+                reply += "\n```"
     band, notes = assurance(active_prompt, reply or "", diag)
     diag.update(band=band, notes=notes)
     if not safety["safe"] and safety["action"] == "warn":
         reply = f"> {safety['advice']}\n\n{reply}"
-    save_db(db)
+    save_db(db)  # single persisted write for the whole turn
     return {"role": "assistant", "content": reply, "diag": {k: v for k, v in diag.items() if not k.startswith("_")}}
 
 
@@ -2572,7 +2965,17 @@ if ui_mode == "✦ VOID Core (Adaptive Chat)":
                     if st.button(label, use_container_width=True):
                         quick_prompt = prompt
 
-        for idx, msg in enumerate(current_chat["messages"]):
+        all_messages = current_chat["messages"]
+        RENDER_WINDOW = 24
+        render_start = max(0, len(all_messages) - RENDER_WINDOW)
+        if render_start:
+            with st.expander(f"🗂️ Show {render_start} earlier message(s) — newest {RENDER_WINDOW} shown for speed"):
+                for old_idx, old_msg in enumerate(all_messages[:render_start]):
+                    with st.chat_message(old_msg["role"], avatar=LOGO_B64 if old_msg["role"] == "assistant" else None):
+                        st.markdown(old_msg["content"])
+                        if old_msg.get("diag"):
+                            st.markdown(diag_html(old_msg["diag"]), unsafe_allow_html=True)
+        for idx, msg in enumerate(all_messages[render_start:], start=render_start):
             with st.chat_message(msg["role"], avatar=LOGO_B64 if msg["role"] == "assistant" else None):
                 st.markdown(msg["content"])
                 if msg.get("diag"):
@@ -2619,7 +3022,23 @@ if ui_mode == "✦ VOID Core (Adaptive Chat)":
         active_prompt = current_chat["messages"].pop()["content"]
 
     if active_prompt:
-        full_prompt = f"Attached (`{uploaded_file.name}`):\n```\n{file_context}\n```\n\n{active_prompt}" if file_context else active_prompt
+        attachments = []
+        if file_context:
+            attachments.append(f"Attached (`{uploaded_file.name}`):\n```\n{file_context}\n```")
+        # Vault file/photo attached from the Personal Vault dimension
+        attach_id = st.session_state.pop("vault_attach", None)
+        if attach_id:
+            entry = next((e for e in user_record.get("vault", []) if e["id"] == attach_id), None)
+            if entry:
+                if entry["kind"] == "image":
+                    attachments.append(
+                        f"Attached photo `{entry['name']}` ({entry.get('width') or '?'}×{entry.get('height') or '?'}px), "
+                        f"tags: {', '.join(entry['tags']) or 'none'}, caption: {entry.get('caption') or 'none'}. "
+                        "You cannot see pixels, so reason about it from this metadata and say so if asked to describe visual detail."
+                    )
+                else:
+                    attachments.append(f"Attached vault document `{entry['name']}`:\n```\n{entry.get('index_text', '')[:MAX_FILE_CHARS]}\n```")
+        full_prompt = ("\n\n".join(attachments) + f"\n\n{active_prompt}") if attachments else active_prompt
         if not current_chat["messages"]:
             current_chat["title"] = active_prompt.strip().replace("\n", " ")[:28]
         current_chat["messages"].append({"role": "user", "content": full_prompt})
@@ -3047,10 +3466,14 @@ elif ui_mode == "⚙️ Customization Center":
                 f_length = st.select_slider("Reply length", ["Concise", "Balanced", "Detailed"], value=prefs["reply_length"])
                 f_temp = st.slider("Creativity", 0.0, 1.0, float(prefs["temperature"]), 0.05)
                 f_tokens = st.slider("Max output", 500, 4000, int(prefs["max_tokens"]), 100)
-            b1, b2, b3 = st.columns(3)
+            b1, b2, b3, b4 = st.columns(4)
             f_emoji = b1.toggle("Emoji in UI", value=bool(prefs["emoji"]))
             f_tts = b2.toggle("Auto voice replies", value=bool(prefs["tts"]))
             f_redact = b3.toggle("PII redaction shield", value=bool(prefs["redaction"]))
+            f_vault_ctx = b4.toggle("Search my vault when asked", value=bool(prefs.get("vault_context", True)))
+            f_speed = st.radio("⚡ Speed mode (saved default)", ["Turbo", "Balanced", "Maximum Power"],
+                               index=["Turbo", "Balanced", "Maximum Power"].index(prefs["speed"]) if prefs.get("speed") in ("Turbo", "Balanced", "Maximum Power") else 1,
+                               help="Turbo = fastest, research only for fresh-news questions, no verification pass. Maximum Power = deep research + cross-model verification.")
             f_custom = st.text_area("Custom instructions VOID always follows", value=prefs.get("custom_instructions", ""),
                                     placeholder="e.g. Always explain with a simple analogy first. I'm preparing for JEE, so add exam-style practice questions.")
             submitted = st.form_submit_button("💾 Save my customization", type="primary")
@@ -3068,6 +3491,7 @@ elif ui_mode == "⚙️ Customization Center":
                 "depth": f_depth, "research": f_research, "reply_length": f_length,
                 "temperature": f_temp, "max_tokens": f_tokens, "emoji": f_emoji, "tts": f_tts,
                 "redaction": f_redact, "custom_instructions": f_custom,
+                "speed": f_speed, "vault_context": f_vault_ctx,
             })
             save_db(db)
             st.success("Preferences saved across all your sessions.")
@@ -3162,6 +3586,189 @@ function eq(){try{sc.value=Function('return ('+sc.value.replace(/×/g,'*').repla
             st.area_chart(df.select_dtypes(include="number"), height=260)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
+# ---------- Dimension: My Files & Photos (Personal Vault) ----------
+elif ui_mode == "🔎 My Files & Photos":
+    vault = user_record.setdefault("vault", [])
+    st.markdown("### 🔎 My Files & Photos — search everything you upload")
+    v1, v2, v3 = st.columns(3)
+    v1.metric("Items", len(vault))
+    v2.metric("Documents", sum(1 for e in vault if e["kind"] == "document"))
+    v3.metric("Photos", sum(1 for e in vault if e["kind"] == "image"))
+
+    with st.container(border=True):
+        up_cols = st.columns([2, 1])
+        with up_cols[0]:
+            vault_files = st.file_uploader(
+                "Upload files or photos (multi-select)", accept_multiple_files=True,
+                type=[ext.lstrip(".") for ext in TEXT_EXT + IMAGE_EXT] + ["docx", "pdf"],
+            )
+        with up_cols[1]:
+            upload_tags = st.text_input("Tags (comma separated)", placeholder="school, physics, invoice")
+        if vault_files and st.button("📥 Index into my vault", type="primary"):
+            ok_n, fail_n = 0, 0
+            for vf in vault_files:
+                try:
+                    entry = add_vault_entry(user_record, user_email, vf, upload_tags)
+                    ok_n += 1
+                    audit(db, "vault_upload", actor=user_email, detail=f"{entry['name']} ({entry['note']})")
+                except Exception as exc:
+                    fail_n += 1
+                    audit(db, "vault_upload_failed", "warning", str(exc)[:160], user_email)
+            save_db(db)
+            if ok_n:
+                st.success(f"Indexed {ok_n} file(s) — full text and tags are now searchable." + (f" {fail_n} failed." if fail_n else ""))
+            st.rerun()
+
+    vault_query = st.text_input("🔎 Search my files & photos", placeholder="Try a word from inside a document, a tag, or a filename…")
+    if vault_query.strip():
+        hits = search_vault(vault, vault_query)
+        st.caption(f"{len(hits)} match(es)")
+        if not hits:
+            st.info("No matches. Upload more files or add tags to widen the index.")
+        for e in hits:
+            with st.container(border=True):
+                h1, h2 = st.columns([5, 2])
+                h1.markdown(f"**{esc(e['name'])}** · `{e['kind']}` · {e['size'] // 1024} KB · {esc(e['uploaded'])}")
+                h2.caption(" · ".join(e["tags"]) or "no tags")
+                if e["kind"] == "image":
+                    try:
+                        st.image(e["path"], width=260)
+                    except Exception:
+                        st.caption("(preview unavailable)")
+                st.markdown(vault_snippet(e, vault_query))
+                b_a, b_t, b_d = st.columns(3)
+                if b_a.button("💬 Attach to chat", key=f"va_{e['id']}", use_container_width=True):
+                    st.session_state.vault_attach = e["id"]
+                    st.success(f"'{e['name']}' will be attached to your next Core chat message.")
+                with b_t.popover("🏷️ Edit tags / caption", use_container_width=True):
+                    new_tags = st.text_input("Tags", value=", ".join(e["tags"]), key=f"vt_{e['id']}")
+                    new_cap = st.text_area("Caption (searchable)", value=e.get("caption", ""), key=f"vc_{e['id']}")
+                    if st.button("Save", key=f"vs_{e['id']}", type="primary"):
+                        e["tags"] = [t.strip().lower() for t in re.split(r"[,#]", new_tags) if t.strip()][:20]
+                        e["caption"] = new_cap.strip()[:500]
+                        save_db(db)
+                        st.rerun()
+                if b_d.button("🗑️ Delete", key=f"vd_{e['id']}", use_container_width=True):
+                    try:
+                        os.remove(e["path"])
+                    except OSError:
+                        pass
+                    user_record["vault"] = [x for x in vault if x["id"] != e["id"]]
+                    save_db(db)
+                    st.rerun()
+    else:
+        tab_doc, tab_img, tab_all = st.tabs([f"📄 Documents ({sum(1 for e in vault if e['kind'] == 'document')})",
+                                             f"🖼️ Photos ({sum(1 for e in vault if e['kind'] == 'image')})",
+                                             "🗃️ All items"])
+        def _render_vault_list(items):
+            if not items:
+                st.caption("Nothing here yet — upload above.")
+            for e in items:
+                st.markdown(f"- **{esc(e['name'])}** · `{e['kind']}` · {e['size'] // 1024} KB · {esc(e['note'])} · tags: {esc(', '.join(e['tags']) or '—')}")
+        with tab_doc:
+            _render_vault_list([e for e in vault if e["kind"] == "document"])
+        with tab_all:
+            _render_vault_list(vault)
+        with tab_img:
+            imgs = [e for e in vault if e["kind"] == "image"]
+            if imgs:
+                for grp in (imgs[i:i + 3] for i in range(0, len(imgs), 3)):
+                    cols = st.columns(3)
+                    for col, e in zip(cols, grp):
+                        with col:
+                            try:
+                                st.image(e["path"], use_container_width=True)
+                            except Exception:
+                                st.caption(esc(e["name"]))
+                            st.caption(f"{esc(e['name'][:34])} · {', '.join(e['tags']) or 'no tags'}")
+            else:
+                st.caption("No photos yet.")
+
+# ---------- Dimension: File & Photo Factory ----------
+elif ui_mode == "🗂️ File & Photo Factory":
+    st.markdown("### 🗂️ File & Photo Factory — describe it, VOID makes the file")
+    with st.container(border=True):
+        f1, f2 = st.columns([1, 2])
+        with f1:
+            kind_label = st.selectbox("File type", list(FACTORY_KINDS.keys()))
+            factory_kind = FACTORY_KINDS[kind_label]
+        with f2:
+            factory_spec = st.text_area("What should the file contain?", height=130,
+                                        placeholder="e.g. A CSV of 10 Indian states with capital, language and area; or a PNG of a cyber-glass Ganga ghat at night")
+        if st.button("🛠️ Generate file", type="primary") and factory_spec.strip():
+            rate_ok, _, _, retry = limiter.check("image" if factory_kind in ("png", "svg") else "chat", user_email)
+            if not rate_ok:
+                st.warning(f"🛡️ Rate shield active — retry in {retry // 60}m {retry % 60}s.")
+            else:
+                with st.spinner("Building your file…"):
+                    fdiag = {}
+                    try:
+                        fname, fbytes, mime, note = build_factory_file(factory_kind, factory_spec, cosmic_entity, fdiag)
+                        st.session_state.factory_last = (fname, fbytes, mime, note)
+                        audit(db, "factory_file", actor=user_email, detail=f"{fname} ({note})")
+                        save_db(db)
+                    except Exception as exc:
+                        st.error(f"Factory error: {redact_secrets(str(exc))[:200]}")
+        if st.session_state.get("factory_last"):
+            fname, fbytes, mime, note = st.session_state.factory_last
+            st.success(f"Ready: **{fname}** · {note} · {len(fbytes) // 1024} KB")
+            if mime.startswith("image"):
+                st.image(fbytes, width=420)
+            elif mime.startswith("audio"):
+                st.audio(fbytes, format=mime)
+            d1, d2, d3 = st.columns(3)
+            d1.download_button("📥 Download", fbytes, file_name=fname, mime=mime, type="primary", use_container_width=True)
+            if d2.button("🗂️ Save to my vault", use_container_width=True):
+                folder = user_asset_dir(user_email)
+                eid = uuid.uuid4().hex[:10]
+                path = os.path.join(folder, f"{eid}_{safe_name(fname, 60)}")
+                with open(path, "wb") as fh:
+                    fh.write(fbytes)
+                user_record.setdefault("vault", []).insert(0, {
+                    "id": eid, "name": fname, "kind": "image" if mime.startswith("image") else "document",
+                    "size": len(fbytes), "path": path, "tags": ["factory-made"], "caption": factory_spec[:300],
+                    "index_text": factory_spec, "note": f"created in File Factory ({note})",
+                    "width": None, "height": None, "uploaded": datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
+                })
+                save_db(db)
+                st.rerun()
+            if d3.button("🔄 Clear", use_container_width=True):
+                st.session_state.pop("factory_last", None)
+                st.rerun()
+
+# ---------- Dimension: Newsroom ----------
+elif ui_mode == "📰 Newsroom":
+    st.markdown("### 📰 Newsroom — named publishers, curated in one place")
+    with st.container(border=True):
+        n1, n2 = st.columns([1, 1])
+        with n1:
+            default_sources = ["🟦 MSN News", "🟠 Al Jazeera", "📰 Google News India"]
+            selected_sources = st.multiselect("Publishers & feeds", list(NEWS_SOURCES.keys()),
+                                              default=[s for s in default_sources if s in NEWS_SOURCES])
+        with n2:
+            cat = st.selectbox("Category", list(NEWS_CATEGORIES.keys()))
+            news_query = st.text_input("Optional keyword search", placeholder="Leave blank for category headlines")
+        per_source = st.slider("Headlines per source", 3, 15, 7)
+        if st.button("📡 Fetch live headlines", type="primary") and selected_sources:
+            with st.spinner("Contacting publisher feeds…"):
+                st.session_state.news_items = newsroom_fetch(selected_sources, NEWS_CATEGORIES[cat], news_query, per_source)
+        items = st.session_state.get("news_items", [])
+        if items:
+            st.caption(f"{len(items)} deduplicated headlines · cached 10 min to respect publishers")
+            for it in items[:40]:
+                st.markdown(f"- **[{esc(it['title'])}]({it['link']})**  \n  <small>{esc(it['source'])} · {esc(it['published'][:32])}</small>", unsafe_allow_html=True)
+            if st.button("🤖 Summarize these headlines with VOID"):
+                bullet = "\n".join(f"- {i['title']} ({i['source']})" for i in items[:20])
+                sys_p = ("You are VOID's news editor. Summarize the headlines into a short, neutral briefing: "
+                         "3-5 key themes, each with 2-3 bullet points, noting the source mix. No invented facts.")
+                with st.spinner("Writing briefing…"):
+                    brief, err = call_llm(cosmic_entity, sys_p, [{"role": "user", "content": bullet}], 0.3, 1800)
+                st.markdown(brief or f"⚠️ {err}")
+        elif "news_items" in st.session_state:
+            st.warning("No headlines returned — try different sources or keywords.")
+        st.caption("Feeds: MSN (via Google News route), Al Jazeera, BBC India/World, Google News, Times of India, "
+                   "The Hindu, Economic Times, TechCrunch, ESPNcricinfo, Bing. Add more RSS URLs in NEWS_SOURCES.")
+
 # ---------- Dimension 11: Engine Doctor & Telemetry ----------
 elif ui_mode == "🩺 Engine Doctor & Telemetry":
     with st.container(border=True):
@@ -3201,3 +3808,5 @@ st.markdown(
     "Adaptive Learning · Polyglot · Emotional Intelligence · Expert Domains · Voice · Security · Ethics</div>",
     unsafe_allow_html=True,
 )
+
+
