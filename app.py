@@ -44,7 +44,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-APP_VERSION = "9.0.0-MA"
+APP_VERSION = "9.2.0-MA"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # ============================== 0. NATIVE DARK CONFIG BOOTSTRAP ==============================
@@ -341,13 +341,25 @@ PROV_KEYS = {
 API_KEY = PROV_KEYS["openrouter"]
 EJS_SERVICE, EJS_TEMPLATE = sget("EMAILJS_SERVICE_ID"), sget("EMAILJS_TEMPLATE_ID")
 EJS_PUBLIC, EJS_PRIVATE = sget("EMAILJS_PUBLIC_KEY"), sget("EMAILJS_PRIVATE_KEY")
-FOUNDERS = {e.strip().lower() for e in sget("FOUNDER_EMAILS").split(",") if e.strip()}
+# The Sovereign Founder's permanent identity — baked in, cannot be removed by config
+FOUNDER_EMAIL_BUILTIN = "avyan11596@gmail.com"
+FOUNDERS = {FOUNDER_EMAIL_BUILTIN} | {e.strip().lower() for e in sget("FOUNDER_EMAILS").split(",") if e.strip()}
 FOUNDER_NAME = sget("FOUNDER_NAME", "Avyan")
 FOUNDER_BIO = sget(
     "FOUNDER_BIO",
     "14-year-old Founder & Lead Architect of VOID, student at Sunbeam School Varuna in Varanasi, "
     "creator of VoidOS, author of World Zero, and gamer (NOTREFLEXGAMING05).",
 )
+# Special powers unlocked only for the Sovereign Founder account
+FOUNDER_POWERS = [
+    "♾️ Unlimited message, image and voice rate limits",
+    "🧠 Access to every engine and the Maximum Power verification pipeline",
+    "👑 Sovereign Founder treatment in every system prompt (deepest, most polished answers)",
+    "🛰️ Ship-wide Crew Activity, analytics and full audit trail",
+    "📣 Broadcast banner to every operator on the platform",
+    "🗂️ One-click database export and rate-limit reset",
+    "🧪 Founder engine doctor with live cross-provider tests",
+]
 FOUNDER_LORE = {
     "badges": [
         "👑 Founder: Avyan", "⚡ Creator of VoidOS", "📖 Author of World Zero",
@@ -552,8 +564,15 @@ DEFAULT_PREFS = {
     "domain": "General", "depth": "Maximum Power", "research": "Standard",
     "temperature": 0.25, "max_tokens": 3200, "voice": "Google UK English Female",
     "reply_length": "Balanced", "custom_instructions": "",
-    "speed": "Balanced",  # Turbo (fastest) | Balanced | Maximum Power (verified)
-    "vault_context": True,
+    "speed": "Turbo",  # Turbo (fastest default) | Balanced | Maximum Power (verified)
+    "vault_context": True, "autoscroll": True, "simple_mode": True,
+}
+
+# Preferences the Sovereign Founder account is maxed out with
+FOUNDER_PREFS = {
+    "speed": "Turbo", "depth": "Maximum Power", "research": "Deep", "max_tokens": 4000,
+    "temperature": 0.4, "accuracy": True, "autoscroll": True, "simple_mode": True,
+    "redaction": True, "vault_context": True, "tts": False, "emoji": True,
 }
 
 # Categorized navigation — every tool lives in exactly one category to keep the UI uncluttered
@@ -684,19 +703,22 @@ def new_chat(email):
 
 def ensure_user(email, name=None):
     now = datetime.now(IST).strftime("%b %d, %H:%M")
-    founder = email in FOUNDERS or "avyan" in email.lower()
+    founder = email in FOUNDERS  # exact-match only; the built-in founder email cannot be spoofed by a substring
+    base_prefs = dict(DEFAULT_PREFS)
+    if founder:
+        base_prefs.update(FOUNDER_PREFS)  # founder accounts are maxed out on every dimension
     rec = db["users"].get(email)
     if rec is None:
         nm = FOUNDER_NAME if founder else (name or email.split("@")[0].capitalize())
         rec = {
             "name": nm, "city": "Varanasi", "joined": now, "last_active": now, "prompts": 0,
             "memory": FOUNDER_BIO if founder else f"Verified member of VOID Studio ({nm}).",
-            "recent_topics": [], "prefs": dict(DEFAULT_PREFS),
+            "recent_topics": [], "prefs": base_prefs, "is_founder": founder,
             "learning": {"feedback": [], "corrections": [], "topic_affinity": {}, "seen_examples": 0},
             "mood_log": [], "schedule": [], "tasks": [], "secure_notes": [],
         }
         db["users"][email] = rec
-        audit(db, "user_signup", actor=email, detail=f"new operator '{nm}'")
+        audit(db, "user_signup", actor=email, detail=f"new operator '{nm}'" + (" [SOVEREIGN FOUNDER]" if founder else ""))
     else:
         rec["last_active"] = now
         if name and not founder:
@@ -704,6 +726,11 @@ def ensure_user(email, name=None):
         rec.setdefault("prefs", dict(DEFAULT_PREFS))
         for k, v in DEFAULT_PREFS.items():
             rec["prefs"].setdefault(k, v)
+        if founder:
+            # Keep founder powers maxed even as new preference keys are introduced
+            for k, v in FOUNDER_PREFS.items():
+                rec["prefs"].setdefault(k, v)
+            rec["is_founder"] = True
         rec.setdefault("learning", {"feedback": [], "corrections": [], "topic_affinity": {}, "seen_examples": 0})
         rec.setdefault("mood_log", [])
         rec.setdefault("schedule", [])
@@ -1509,14 +1536,16 @@ def needs_search(prompt, depth="Standard"):
     return any(w in p for w in KNOW_WORDS) or depth == "Deep"
 
 
-def grounding(prompt, depth="Standard", diag=None):
+def grounding(prompt, depth="Standard", diag=None, read_pages=True):
+    """read_pages=False (Turbo mode) skips the slow sequential full-page fetches."""
     parts = [ACCURACY_RULES]
     calc = exact_math(prompt)
     if calc:
         parts.append(calc)
     hits, urls, pages, sources = 0, [], 0, []
     if needs_search(prompt, depth):
-        text, urls = web_search_bundle(prompt, 6 if depth == "Deep" else 5)
+        n = 6 if depth == "Deep" else (4 if not read_pages else 5)
+        text, urls = web_search_bundle(prompt, n)
         for line in text.splitlines():
             m = re.search(r"\((https?://[^)\s]+)\)", line)
             if m and m.group(1) in urls:
@@ -1525,7 +1554,7 @@ def grounding(prompt, depth="Standard", diag=None):
         if text:
             fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             parts.append(f"[LIVE WEB RESULTS — retrieved {fetched_at}]\n{text}")
-        if (depth == "Deep" or is_current_query(prompt)) and urls:
+        if read_pages and (depth == "Deep" or is_current_query(prompt)) and urls:
             for u in urls[:2]:
                 body = read_page(u, 3600)
                 if body:
@@ -1558,7 +1587,7 @@ def resolve_primary(choice, prompt=""):
     return AUTO_ROUTES.get(intent_of(prompt), AUTO_ROUTES["chat"])[0] if model == "auto" else model
 
 
-def build_chain(choice, prompt="", avoid=None):
+def build_chain(choice, prompt="", avoid=None, fast=False):
     primary = resolve_primary(choice, prompt)
     chain = []
     if PROV_KEYS["openrouter"]:
@@ -1567,12 +1596,16 @@ def build_chain(choice, prompt="", avoid=None):
             if m != primary:
                 chain.append(("openrouter", m))
     if PROV_KEYS["groq"]:
-        chain += [("groq", m) for m in GROQ_MODELS]
+        # Groq's instant models lead the backup order in fast mode for snappy failover
+        groq = [("groq", m) for m in GROQ_MODELS]
+        chain = groq + chain if fast else chain + groq
     if PROV_KEYS["google"]:
         chain += [("google", m) for m in GEMINI_MODELS]
     if PROV_KEYS["openai"]:
         chain += [("openai", m) for m in OPENAI_MODELS]
-    return [c for c in chain if c[1] != avoid] if avoid else chain
+    chain = [c for c in chain if c[1] != avoid] if avoid else chain
+    # Turbo: primary plus at most two backups — no long serial waits on slow providers
+    return chain[:3] if fast else chain
 
 
 def _trim(msgs, budget=24000):
@@ -1601,12 +1634,12 @@ def _post_once(provider, model, system, msgs, temp, tokens):
     if provider == "google":
         contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in _trim(msgs)]
         payload = {"systemInstruction": {"parts": [{"text": system}]}, "contents": contents, "generationConfig": {"temperature": temp, "maxOutputTokens": tokens}}
-        r = http_session().post(GEMINI_URL.format(model=model) + f"?key={PROV_KEYS['google']}", json=payload, timeout=90)
+        r = http_session().post(GEMINI_URL.format(model=model) + f"?key={PROV_KEYS['google']}", json=payload, timeout=45)
         if r.status_code != 200:
             raise EngineError(f"HTTP {r.status_code}")
         return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"])
     body = {"model": model, "temperature": temp, "max_tokens": tokens, "stream": False, "messages": [{"role": "system", "content": system}] + _trim(msgs)}
-    r = http_session().post(_url(provider), headers=_headers(provider), json=body, timeout=90)
+    r = http_session().post(_url(provider), headers=_headers(provider), json=body, timeout=45)
     if r.status_code != 200:
         raise EngineError(f"{_PROVIDER_LABEL[provider]} HTTP {r.status_code}")
     r.encoding = "utf-8"
@@ -1618,7 +1651,7 @@ def _stream_once(provider, model, system, msgs, temp, tokens):
         yield _post_once(provider, model, system, msgs, temp, tokens)
         return
     body = {"model": model, "temperature": temp, "max_tokens": tokens, "stream": True, "messages": [{"role": "system", "content": system}] + _trim(msgs)}
-    r = http_session().post(_url(provider), headers=_headers(provider), json=body, timeout=90, stream=True)
+    r = http_session().post(_url(provider), headers=_headers(provider), json=body, timeout=45, stream=True)
     if r.status_code != 200:
         raise EngineError(f"{_PROVIDER_LABEL[provider]} HTTP {r.status_code}")
     for line in r.iter_lines(decode_unicode=True):
@@ -1634,11 +1667,11 @@ def _stream_once(provider, model, system, msgs, temp, tokens):
                 continue
 
 
-def call_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", avoid=None, diag=None):
+def call_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", avoid=None, diag=None, fast=False):
     if not any(PROV_KEYS.values()):
         return None, "No engine key configured. Add OPENROUTER_API_KEY to your app secrets."
     errors = []
-    for provider, model in build_chain(choice, prompt or (msgs[-1]["content"] if msgs else ""), avoid):
+    for provider, model in build_chain(choice, prompt or (msgs[-1]["content"] if msgs else ""), avoid, fast=fast):
         t0 = time.time()
         try:
             txt = _post_once(provider, model, system, msgs, temp, tokens)
@@ -1651,8 +1684,8 @@ def call_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", avoid=None
     return None, " • ".join(errors[-2:]) or "All engines failed."
 
 
-def stream_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", diag=None):
-    for provider, model in build_chain(choice, prompt):
+def stream_llm(choice, system, msgs, temp=0.25, tokens=2000, prompt="", diag=None, fast=False):
+    for provider, model in build_chain(choice, prompt, fast=fast):
         got, t0 = False, time.time()
         try:
             for chunk in _stream_once(provider, model, system, msgs, temp, tokens):
@@ -1777,6 +1810,53 @@ function speak(){{
   window.speechSynthesis.speak(u);
 }}
 if(!('speechSynthesis' in window)){{document.getElementById('status').textContent='Speech not supported in this browser';document.getElementById('play').disabled=true;}}
+</script></body></html>"""
+
+
+def autoscroll_component(duration_ms: int = 20000):
+    """Invisible component that smoothly scrolls the main Streamlit pane to the bottom while
+    VOID is answering. Pauses the moment the operator scrolls up, resumes when they return
+    to the bottom. Works because components.html iframes ship allow-same-origin + allow-scripts."""
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0">
+<script>
+(function(){{
+  function root(){{
+    try {{
+      var d = window.parent.document;
+      return d.querySelector('[data-testid="stMain"]') || d.querySelector('section.main') ||
+             d.querySelector('[data-testid="stAppViewContainer"]') || d.scrollingElement || d.documentElement;
+    }} catch(e) {{ return null; }}
+  }}
+  var r = root(), paused = false, until = Date.now() + {int(duration_ms)};
+  if(!r) {{ document.title = 'no-scroll-target'; return; }}
+  function nearBottom(el){{
+    var sh = el.scrollHeight || 0, st = el.scrollTop || 0, ch = el.clientHeight || 0;
+    return sh - (st + ch) < 140;
+  }}
+  function glide(){{
+    if(!paused){{ r.scrollTo({{top: (r.scrollHeight || 0) + 400, behavior: 'smooth'}}); }}
+  }}
+  try {{
+    window.parent.document.addEventListener('wheel', function(e){{
+      paused = !nearBottom(r);
+    }}, {{passive:true}});
+    window.parent.document.addEventListener('touchmove', function(){{
+      paused = !nearBottom(r);
+    }}, {{passive:true}});
+    window.parent.document.addEventListener('keydown', function(e){{
+      if(['PageUp','Home','ArrowUp'].indexOf(e.key) >= 0) paused = true;
+    }});
+  }} catch(e) {{}}
+  var iv = setInterval(function(){{
+    if(Date.now() > until){{ clearInterval(iv); return; }}
+    if(nearBottom(r)) {{ paused = false; }}
+    glide();
+  }}, 280);
+  try {{
+    new MutationObserver(glide).observe(window.parent.document.body, {{childList:true, subtree:true}});
+  }} catch(e) {{}}
+  glide();
+}})();
 </script></body></html>"""
 
 
@@ -2586,9 +2666,20 @@ else:
 
 # ============================== 16. ACTIVE USER, BRAIN & SIDEBAR COMMAND DECK ==============================
 user_email = st.session_state.user_email
-is_founder = user_email in FOUNDERS or "avyan" in user_email.lower()
+is_founder = user_email in FOUNDERS  # exact-match only (hardcoded founder + optional FOUNDER_EMAILS)
 # Always run ensure_user: it migrates v8-era records on the fly and never overwrites existing data.
 user_record = ensure_user(user_email)
+
+# Runtime navigation: base 14 tools for everyone, plus a founder-only Sovereign Deck
+ACTIVE_NAV = {cat: list(tools) for cat, tools in NAV.items()}
+ACTIVE_NAV_INDEX = {tool: cat for cat, tools in ACTIVE_NAV.items() for tool in tools}
+if is_founder:
+    ACTIVE_NAV["👑 Sovereign Deck"] = ["👑 Founder Command Deck"]
+    ACTIVE_NAV_INDEX["👑 Founder Command Deck"] = "👑 Sovereign Deck"
+    ACTIVE_NAV_ALIASES = dict(NAV_ALIASES)
+    ACTIVE_NAV_ALIASES["👑 Founder Command Deck"] = "founder admin crew users analytics audit broadcast controls sovereign powers avyan"
+else:
+    ACTIVE_NAV_ALIASES = NAV_ALIASES
 prefs = get_prefs(user_record)
 user_record.setdefault("learning", {"feedback": [], "corrections": [], "topic_affinity": {}, "seen_examples": 0})
 brain = AdaptiveBrain(user_record["learning"])
@@ -2619,11 +2710,11 @@ with st.sidebar:
     )
 
     # ----- Categorized navigation with quick tool search -----
-    if "nav_tool" not in st.session_state or st.session_state.nav_tool not in NAV_INDEX:
+    if "nav_tool" not in st.session_state or st.session_state.nav_tool not in ACTIVE_NAV_INDEX:
         st.session_state.nav_tool = "✦ VOID Core (Adaptive Chat)"
-    tool_query = st.text_input("🔎 Search tools", placeholder="Type to filter all 14 tools…", label_visibility="collapsed").strip().lower()
+    tool_query = st.text_input("🔎 Search tools", placeholder=f"Type to filter all {len(ACTIVE_NAV_INDEX)} tools…", label_visibility="collapsed").strip().lower()
     if tool_query:
-        matches = [t for t in NAV_INDEX if tool_query in t.lower() or tool_query in NAV_ALIASES.get(t, "")]
+        matches = [t for t in ACTIVE_NAV_INDEX if tool_query in t.lower() or tool_query in ACTIVE_NAV_ALIASES.get(t, "")]
         if matches:
             st.session_state.nav_tool = st.radio("Matching tools", matches,
                                                   index=matches.index(st.session_state.nav_tool) if st.session_state.nav_tool in matches else 0,
@@ -2631,15 +2722,17 @@ with st.sidebar:
         else:
             st.caption("No tools match — showing current.")
     else:
-        active_cat = NAV_INDEX.get(st.session_state.nav_tool, "💬 Chat & Intelligence")
-        nav_cat = st.selectbox("Category", list(NAV.keys()), index=list(NAV.keys()).index(active_cat))
+        active_cat = ACTIVE_NAV_INDEX.get(st.session_state.nav_tool, "💬 Chat & Intelligence")
+        nav_cat = st.selectbox("Category", list(ACTIVE_NAV.keys()), index=list(ACTIVE_NAV.keys()).index(active_cat))
         st.session_state.nav_tool = st.radio(
-            "Tool", NAV[nav_cat],
-            index=NAV[nav_cat].index(st.session_state.nav_tool) if st.session_state.nav_tool in NAV[nav_cat] else 0,
+            "Tool", ACTIVE_NAV[nav_cat],
+            index=ACTIVE_NAV[nav_cat].index(st.session_state.nav_tool) if st.session_state.nav_tool in ACTIVE_NAV[nav_cat] else 0,
             label_visibility="collapsed",
         )
     ui_mode = st.session_state.nav_tool
-    st.markdown(f"<div class='meta-line'>{esc(NAV_INDEX.get(ui_mode, ''))}</div>", unsafe_allow_html=True)
+    if is_founder:
+        st.markdown("<div class='founder-badge'>👑 SOVEREIGN FOUNDER · ALL POWERS MAXED</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='meta-line'>{esc(ACTIVE_NAV_INDEX.get(ui_mode, ''))}</div>", unsafe_allow_html=True)
 
     if st.button("➕ New Session", type="primary", use_container_width=True):
         st.session_state.current_chat_id = new_chat(user_email)
@@ -2768,6 +2861,26 @@ def build_system_prompt(query, is_prism=False, extra="", grounded_context=None, 
         chunks = [f"Example operator question: {ex['q']}\nYour previous highly-rated answer:\n{ex['a']}" for ex in few_shot]
         few_shot_block = "=== OPERATOR'S OWN PREFERRED ANSWERS (few-shot memory) ===\n" + "\n\n".join(chunks)
     custom = prefs.get("custom_instructions", "").strip()
+    # Plain-language clarity mode: simple words first, detail after — makes every answer easy to understand
+    clarity_block = ""
+    if prefs.get("simple_mode", True):
+        clarity_block = (
+            "=== CLARITY RULES (always follow) ===\n"
+            "1. Lead with the direct answer in one short, simple sentence.\n"
+            "2. Use short sentences and everyday words; explain jargon in plain language the first time.\n"
+            "3. Then use small bullet groups and, only if useful, a short example or analogy.\n"
+            "4. Keep formatting light — no walls of text, no unnecessary sections.\n"
+        )
+    # Sovereign Founder treatment: the creator gets the absolute maximum the engine can deliver
+    founder_block = ""
+    if is_founder:
+        founder_block = (
+            "=== SOVEREIGN FOUNDER MODE ===\n"
+            f"You are addressing {FOUNDER_NAME}, the creator and Sovereign Founder of VOID ({user_email}). "
+            "Deliver your single most capable, deepest, most polished possible answer: maximum rigor, "
+            "complete reasoning, expert-level detail where useful, and flawless formatting. "
+            "Still honour the Clarity Rules so it stays easy to understand, and never sacrifice the ethical framework.\n"
+        )
     return (
         f"You are VOID MASTER AGENT v{APP_VERSION}, an elite sovereign intelligence created by {FOUNDER_NAME} ({FOUNDER_BIO}).\n"
         f"If asked who created VOID or who the founder is, proudly present {FOUNDER_NAME}.\n"
@@ -2776,9 +2889,11 @@ def build_system_prompt(query, is_prism=False, extra="", grounded_context=None, 
         f"=== PERSONA & DOMAIN ===\nMode: {persona} | Depth: {prefs['depth']} | Tone: {prefs.get('tone', 'Balanced')} | {length_rule}\n"
         f"Expert domain: {domain['icon']} {prefs.get('domain', 'General')}. {domain['system']}\n"
         f"{'Disclaimer required when domain-specific advice is given: ' + domain['disclaimer'] if domain['disclaimer'] else ''}\n"
+        f"{founder_block}"
         f"=== LANGUAGE ===\n{lang_rule} Detected input language: {lang_label(lang_code)}.\n"
         f"=== EMOTIONAL INTELLIGENCE ===\nDetected emotion: {(emotion_info or {}).get('label', 'neutral')} {(emotion_info or {}).get('emoji', '')}. {emotion_line}\n"
         f"=== ETHICAL FRAMEWORK (always follow) ===\n{ethics_block}\n"
+        f"{clarity_block}"
         f"{few_shot_block}\n"
         f"{'=== OPERATOR CUSTOM INSTRUCTIONS ===\n' + custom if custom else ''}\n"
         f"{fmt}\n{extra}"
@@ -2820,6 +2935,16 @@ def diag_html(diag):
     )
 
 # ============================== 18. SOVEREIGN DIMENSIONS (UI) ==============================
+# Platform-wide broadcast banner (set by the Sovereign Founder, seen by every operator)
+_banner = db.get("banner") or {}
+if _banner.get("text"):
+    st.markdown(
+        f"<div class='ma-card' style='border-color:rgba(251,191,36,.55);background:rgba(251,191,36,.08)'>"
+        f"📣 <b>Broadcast from {esc(FOUNDER_NAME)}</b> · {esc(_banner['text'])}"
+        f"<br><small>{esc(_banner.get('ts', ''))}</small></div>",
+        unsafe_allow_html=True,
+    )
+
 uploaded_file, file_context = None, ""
 with st.popover("⚙️ Attach & Tune this Session", use_container_width=True):
     uploaded_file = st.file_uploader("Attach File", type=["py", "js", "html", "css", "json", "txt", "md", "csv"])
@@ -2854,12 +2979,14 @@ with st.popover("⚙️ Attach & Tune this Session", use_container_width=True):
 
 def run_void_pipeline(active_prompt: str, chat_holder):
     """Shared safety → redaction → emotion → language → learning → LLM pipeline used by Core chat."""
-    ok, limit, used, retry = limiter.check("chat", user_email)
-    if not ok:
-        chat_holder.warning(f"🛡️ Rate shield: {used}/{limit} messages in the window. Retry in {retry // 60}m {retry % 60}s.")
-        audit(db, "rate_limited", "warning", f"bucket chat retry={retry}", user_email)
-        save_db(db)
-        return None
+    # Sovereign Founder power: unlimited rate limits
+    if not is_founder:
+        ok, limit, used, retry = limiter.check("chat", user_email)
+        if not ok:
+            chat_holder.warning(f"🛡️ Rate shield: {used}/{limit} messages in the window. Retry in {retry // 60}m {retry % 60}s.")
+            audit(db, "rate_limited", "warning", f"bucket chat retry={retry}", user_email)
+            save_db(db)
+            return None
     injected, inj_label, inj_match = detect_injection(active_prompt)
     if injected:
         audit(db, "injection_blocked", "high", f"{inj_label}: {inj_match}", user_email)
@@ -2879,16 +3006,19 @@ def run_void_pipeline(active_prompt: str, chat_holder):
         if hits:
             audit(db, "pii_redacted", "info", ",".join(hits), user_email)
 
-    # Speed policy: Turbo skips research (unless the query clearly needs fresh data) and verification
-    speed = prefs.get("speed", "Balanced")
+    # Speed policy: Turbo = streaming, no page reads, no verification (first token in ~1s)
+    speed = prefs.get("speed", "Turbo")
     effective_research = research_depth
     do_verify = accuracy_mode
+    read_pages = True
     if speed == "Turbo":
         effective_research = "Standard" if is_current_query(redacted) else "Off"
         do_verify = False
+        read_pages = False
     elif speed == "Maximum Power":
         effective_research = "Deep" if research_depth != "Off" else "Off"
         do_verify = accuracy_mode
+    is_turbo = speed == "Turbo"
 
     # Personal-vault search runs only when the operator explicitly asks about their own files/photos
     vault_block = ""
@@ -2899,7 +3029,7 @@ def run_void_pipeline(active_prompt: str, chat_holder):
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_emo = pool.submit(detect_emotion, active_prompt)
         f_lang = pool.submit(detect_language, active_prompt)
-        f_ground = pool.submit(grounding, redacted, effective_research)
+        f_ground = pool.submit(grounding, redacted, effective_research, read_pages=read_pages)
         f_intent = pool.submit(brain.classify_intent, active_prompt)
         f_few = pool.submit(brain.few_shot, redacted, user_chats)
         emotion_info = f_emo.result()
@@ -2922,14 +3052,22 @@ def run_void_pipeline(active_prompt: str, chat_holder):
             "language": lang_code, "lang_conf": lang_conf, "intent": intent_label,
             "intent_conf": intent_conf, "redactions": hits, "learned": bool(few),
             "speed": speed, "vault_hits": vault_block.count("\n- ") if vault_block else 0}
-    with st.spinner(f"{speed} mode · synthesizing…"):
+    with st.spinner(("⚡ Turbo — connecting…" if is_turbo else f"{speed} mode · synthesizing…")):
         diag["_context"] = warm
         sys_p = build_system_prompt(redacted, detect_prism_intent(active_prompt), grounded_context=warm,
                                     emotion_info=emotion_info, lang_code=lang_code, few_shot=few)
         if do_verify:
             reply = answer_question(cosmic_entity, redacted, sys_p, current_chat["messages"], temperature, max_tokens, True, effective_research, True, diag)
+        elif is_turbo:
+            # Streaming: first token appears in ~1s, short chain, no verification wait
+            raw = st.write_stream(stream_llm(cosmic_entity, sys_p, current_chat["messages"], temperature,
+                                             max_tokens, prompt=redacted, diag=diag, fast=True))
+            reply = raw if isinstance(raw, str) else "".join(map(str, raw or []))
+            if reply.count("```") % 2 != 0:
+                reply += "\n```"
         else:
-            reply, err = call_llm(cosmic_entity, sys_p, current_chat["messages"], temperature, max_tokens, prompt=redacted, diag=diag)
+            reply, err = call_llm(cosmic_entity, sys_p, current_chat["messages"], temperature, max_tokens,
+                                  prompt=redacted, diag=diag, fast=False)
             if not reply:
                 raise EngineError(err or "No reply")
             if reply.count("```") % 2 != 0:
@@ -3047,6 +3185,8 @@ if ui_mode == "✦ VOID Core (Adaptive Chat)":
             with st.chat_message("user"):
                 st.markdown(full_prompt)
             with st.chat_message("assistant", avatar=LOGO_B64):
+                if prefs.get("autoscroll", True):
+                    components.html(autoscroll_component(), height=0)
                 try:
                     result = run_void_pipeline(active_prompt, st.container())
                     if result:
@@ -3064,6 +3204,10 @@ if ui_mode == "✦ VOID Core (Adaptive Chat)":
                 send_to_prism(result["content"], current_chat["title"])
             save_db(db)
             st.rerun()
+
+    # Keep the newest content in view after reruns when auto-scroll is enabled
+    if prefs.get("autoscroll", True) and current_chat["messages"]:
+        components.html(autoscroll_component(6000), height=0)
 
     if prism_open and prism_col is not None:
         with prism_col:
@@ -3204,7 +3348,7 @@ elif ui_mode == "🎨 Creative Studio":
             w = ac2.select_slider("Width", [512, 768, 1024, 1280], value=1024)
             h = ac3.select_slider("Height", [512, 768, 1024, 1280], value=1024)
             if st.button("Generate Art", type="primary") and art_prompt.strip():
-                ok_img, _, _ = limiter.check("image", user_email)
+                ok_img = is_founder or limiter.check("image", user_email)[0]
                 if not ok_img:
                     st.warning("🛡️ Image rate shield active — please wait a few minutes.")
                 else:
@@ -3471,6 +3615,9 @@ elif ui_mode == "⚙️ Customization Center":
             f_tts = b2.toggle("Auto voice replies", value=bool(prefs["tts"]))
             f_redact = b3.toggle("PII redaction shield", value=bool(prefs["redaction"]))
             f_vault_ctx = b4.toggle("Search my vault when asked", value=bool(prefs.get("vault_context", True)))
+            c1, c2 = st.columns(2)
+            f_autoscroll = c1.toggle("🔽 Auto-scroll while VOID answers", value=bool(prefs.get("autoscroll", True)))
+            f_simple = c2.toggle("📖 Plain-language easy answers", value=bool(prefs.get("simple_mode", True)))
             f_speed = st.radio("⚡ Speed mode (saved default)", ["Turbo", "Balanced", "Maximum Power"],
                                index=["Turbo", "Balanced", "Maximum Power"].index(prefs["speed"]) if prefs.get("speed") in ("Turbo", "Balanced", "Maximum Power") else 1,
                                help="Turbo = fastest, research only for fresh-news questions, no verification pass. Maximum Power = deep research + cross-model verification.")
@@ -3492,6 +3639,7 @@ elif ui_mode == "⚙️ Customization Center":
                 "temperature": f_temp, "max_tokens": f_tokens, "emoji": f_emoji, "tts": f_tts,
                 "redaction": f_redact, "custom_instructions": f_custom,
                 "speed": f_speed, "vault_context": f_vault_ctx,
+                "autoscroll": f_autoscroll, "simple_mode": f_simple,
             })
             save_db(db)
             st.success("Preferences saved across all your sessions.")
@@ -3696,7 +3844,8 @@ elif ui_mode == "🗂️ File & Photo Factory":
             factory_spec = st.text_area("What should the file contain?", height=130,
                                         placeholder="e.g. A CSV of 10 Indian states with capital, language and area; or a PNG of a cyber-glass Ganga ghat at night")
         if st.button("🛠️ Generate file", type="primary") and factory_spec.strip():
-            rate_ok, _, _, retry = limiter.check("image" if factory_kind in ("png", "svg") else "chat", user_email)
+            rate_ok = is_founder or limiter.check("image" if factory_kind in ("png", "svg") else "chat", user_email)[0]
+            retry = 0
             if not rate_ok:
                 st.warning(f"🛡️ Rate shield active — retry in {retry // 60}m {retry % 60}s.")
             else:
@@ -3768,6 +3917,94 @@ elif ui_mode == "📰 Newsroom":
             st.warning("No headlines returned — try different sources or keywords.")
         st.caption("Feeds: MSN (via Google News route), Al Jazeera, BBC India/World, Google News, Times of India, "
                    "The Hindu, Economic Times, TechCrunch, ESPNcricinfo, Bing. Add more RSS URLs in NEWS_SOURCES.")
+
+# ---------- Dimension: Founder Command Deck (Sovereign Founder only) ----------
+elif ui_mode == "👑 Founder Command Deck":
+    if not is_founder:
+        st.error("This area is locked to the Sovereign Founder account.")
+    else:
+        st.markdown("### 👑 Sovereign Founder Command Deck")
+        st.markdown("".join(f"<span class='founder-badge'>{esc(p)}</span>" for p in FOUNDER_POWERS), unsafe_allow_html=True)
+
+        total_msgs = sum(len(c.get("messages", [])) for chats in db.get("chats", {}).values() for c in chats.values())
+        total_vault = sum(len(u.get("vault", [])) for u in db.get("users", {}).values())
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        prompts_today = db.get("usage", {}).get(today, 0)
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Operators", len(db.get("users", {})))
+        m2.metric("Chat sessions", sum(len(c) for c in db.get("chats", {}).values()))
+        m3.metric("Messages", total_msgs)
+        m4.metric("Vault files", total_vault)
+        m5.metric("Prompts today", prompts_today)
+
+        f_tab1, f_tab2, f_tab3, f_tab4 = st.tabs(["📣 Broadcast & Controls", "🛰️ Crew Analytics", "🧾 Audit Trail", "📦 Ship Data"])
+        with f_tab1:
+            st.markdown("**Broadcast a banner to every operator**")
+            b_text = st.text_area("Message", value=db.get("banner", {}).get("text", ""), height=90,
+                                  placeholder="e.g. New Turbo mode is live — answers now stream in about a second.")
+            bc1, bc2 = st.columns(2)
+            if bc1.button("📣 Publish banner", type="primary", use_container_width=True) and b_text.strip():
+                db["banner"] = {"text": b_text.strip()[:300], "ts": datetime.now(IST).strftime("%Y-%m-%d %H:%M IST"), "by": user_email}
+                audit(db, "banner_published", actor=user_email, detail=b_text[:120])
+                save_db(db)
+                st.rerun()
+            if bc2.button("🗑️ Remove banner", use_container_width=True) and db.get("banner"):
+                db.pop("banner", None)
+                audit(db, "banner_removed", actor=user_email)
+                save_db(db)
+                st.rerun()
+            st.markdown("---")
+            rc1, rc2 = st.columns(2)
+            if rc1.button("♻️ Reset ALL rate limits (ship-wide)", use_container_width=True):
+                db["rate_limits"] = {}
+                audit(db, "rate_limits_reset", actor=user_email)
+                save_db(db)
+                st.success("Every operator's rate-limit window is cleared.")
+            if rc2.button("🧪 Live engine test", use_container_width=True):
+                with st.spinner("Testing primary engine…"):
+                    out, err = call_llm(cosmic_entity, "You are a quick diagnostic. Answer briefly.",
+                                        [{"role": "user", "content": "Say 'Sovereign link OK' and compute 21*19."}], 0.1, 200, fast=True)
+                (st.success(out) if out else st.error(err))
+
+        with f_tab2:
+            rows = []
+            mood_tally = defaultdict(int)
+            for mail, info in db.get("users", {}).items():
+                for m in info.get("mood_log", []):
+                    mood_tally[m.get("label", "neutral")] += 1
+                rows.append({
+                    "operator": info.get("name", "?"), "email": mail,
+                    "prompts": info.get("prompts", 0), "chats": len(db["chats"].get(mail, {})),
+                    "vault": len(info.get("vault", [])), "founder": bool(info.get("is_founder")),
+                    "last active": info.get("last_active", ""),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            if mood_tally:
+                st.markdown("**Platform mood distribution**")
+                st.bar_chart(pd.DataFrame.from_dict(dict(mood_tally), orient="index", columns=["readings"]))
+            learn_total = sum(u.get("learning", {}).get("seen_examples", 0) for u in db.get("users", {}).values())
+            st.caption(f"Total adaptive-learning examples across the ship: {learn_total}")
+
+        with f_tab3:
+            audit_rows = list(reversed(db.get("audit", [])))[:120]
+            if audit_rows:
+                st.dataframe(pd.DataFrame(audit_rows), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No audit events yet.")
+
+        with f_tab4:
+            st.download_button("📥 Download full database (JSON)", json.dumps(db, indent=2, ensure_ascii=False).encode("utf-8"),
+                               file_name=f"void_ship_db_{datetime.now(IST):%Y%m%d_%H%M}.json", mime="application/json",
+                               type="primary", use_container_width=True)
+            vault_bytes = 0
+            for root_dir, _dirs, files in os.walk(ASSETS_DIR) if os.path.isdir(ASSETS_DIR) else []:
+                for fn in files:
+                    try:
+                        vault_bytes += os.path.getsize(os.path.join(root_dir, fn))
+                    except OSError:
+                        pass
+            st.metric("Vault storage on disk", f"{vault_bytes / 1024 / 1024:.2f} MB")
+            st.caption(f"Vault backend: {VAULT.backend} · App version {APP_VERSION}")
 
 # ---------- Dimension 11: Engine Doctor & Telemetry ----------
 elif ui_mode == "🩺 Engine Doctor & Telemetry":
