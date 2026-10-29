@@ -275,4 +275,5 @@ def main(page: ft.Page):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     ft.run(main, host=os.getenv('FLET_HOST', '127.0.0.1'), port=int(os.getenv('FLET_PORT', '8550')),
-           view=ft.AppView.WEB_BROWSER if os.getenv('VOID_WEB') == '1' else ft.AppView.FLET_APP)
+           view=ft.AppView.WEB_BROWSER if os.getenv('VOID_WEB') == '1' else ft.AppView.FLET_APP) 
+ 
