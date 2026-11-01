@@ -1,11 +1,16 @@
 """VOID Sovereign Flet application; all inference and storage live in brain.py."""
 from __future__ import annotations
 import asyncio
+import html
 import logging
 import os
+import re
+import shutil
+import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 import flet as ft
 from brain import AdaptiveBrain, LocalEngine, Storage, safe_display, research_web, format_research_context, format_sources, _public_url
@@ -33,6 +38,38 @@ DATA_DIR = Path(os.getenv('VOID_DATA_DIR', str(Path.home() / '.void_sovereign'))
 _STORE: Storage | None = None
 _STORE_LOCK = threading.Lock()
 
+GOOGLE_SITE_VERIFICATION = os.getenv(
+    'GOOGLE_SITE_VERIFICATION', 'Vmq-IlyBC-OsAR4vf0...'
+)
+
+
+@contextmanager
+def verified_web_assets():
+    """Supply Flet with an index.html containing the tag in the initial HTML head."""
+    from flet_web import get_package_web_dir
+
+    original_assets = Path(__file__).resolve().parent / 'assets'
+    with tempfile.TemporaryDirectory(prefix='void-web-assets-') as directory:
+        assets = Path(directory)
+        if original_assets.is_dir():
+            shutil.copytree(original_assets, assets, dirs_exist_ok=True)
+        index = assets / 'index.html'
+        if not index.is_file():
+            shutil.copyfile(Path(get_package_web_dir()) / 'index.html', index)
+        source = index.read_text(encoding='utf-8')
+        tag = '<meta name="google-site-verification" content="{}" />'.format(
+            html.escape(GOOGLE_SITE_VERIFICATION, quote=True)
+        )
+        pattern = r'<meta\b(?=[^>]*\bname\s*=\s*[\"\']google-site-verification[\"\'])[^>]*>'
+        source = re.sub(pattern, '', source, flags=re.IGNORECASE)
+        source, count = re.subn(r'</head\s*>', lambda _: '  ' + tag + '\n</head>',
+                                source, count=1, flags=re.IGNORECASE)
+        if count != 1:
+            raise RuntimeError('Unable to add verification tag: HTML head is missing')
+        index.write_text(source, encoding='utf-8')
+        yield str(assets)
+
+
 def get_store() -> Storage:
     global _STORE
     with _STORE_LOCK:
@@ -52,7 +89,6 @@ def main(page: ft.Page):
     try:
         engine = LocalEngine()
     except ValueError:
-        # Treat invalid configuration as an unavailable local core, never redirect to a remote host.
         engine = None
     state = {'chat': store.new_chat(owner), 'mode': 'VOID Core (Adaptive Chat)', 'busy': False,
              'runs': 0, 'prism': False, 'web': False, 'closed': False, 'attachment': None, 'diagnostics': [],
@@ -127,7 +163,6 @@ def main(page: ft.Page):
         codeblock_decoration=ft.BoxDecoration(bgcolor='#090a10', border=ft.Border.all(1, '#292b3e'), border_radius=10))
 
     def display(value):
-        # Preserve Markdown link targets so source citations remain usable; redact their visible labels.
         import re
         names = engine.known_models if engine else ()
         parts = re.split(r'(\]\([^\s)]*\))', str(value))
@@ -479,7 +514,6 @@ def main(page: ft.Page):
         ft.Row([attach_label, clear_attach], spacing=2),
         glass(ft.Row([attach, command, send], spacing=4), padding=5),
         txt('Enter to send  ·  Shift+Enter for a new line  ·  Check important information', 10, '#717588')]
-    # The colored circles are ornamental: window-manager actions differ across desktop and web.
     header = ft.Row([ft.Container(bgcolor=c, width=10, height=10, border_radius=10) for c in ('#ff6a61', '#f8bf55', '#4fd37b')], spacing=7)
     stage = ft.Container(expand=True, padding=ft.Padding.symmetric(horizontal=32, vertical=22),
                          content=ft.Column([header, stage_body], expand=True, spacing=18))
@@ -489,9 +523,9 @@ def main(page: ft.Page):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
-    # Web binding defaults to loopback for local runs; cloud platforms set PORT.
     port = int(os.getenv('PORT', os.getenv('FLET_PORT', '8550')))
     host = os.getenv('FLET_HOST', '0.0.0.0' if os.getenv('PORT') else '127.0.0.1')
     web = os.getenv('VOID_WEB') == '1' or bool(os.getenv('PORT'))
-    ft.run(main, host=host, port=port,
-           view=ft.AppView.WEB_BROWSER if web else ft.AppView.FLET_APP)
+    with verified_web_assets() as web_assets:
+        ft.run(main, host=host, port=port, assets_dir=web_assets,
+               view=ft.AppView.WEB_BROWSER if web else ft.AppView.FLET_APP)
