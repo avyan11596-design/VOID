@@ -1,18 +1,28 @@
-"""VOID Sovereign Flet application; all inference and storage live in brain.py."""
+"""VOID Sovereign Sovereign OS - Standalone Single-File Flet Application."""
 from __future__ import annotations
 import asyncio
+import html
+import json
 import logging
 import os
+import re
+import shutil
+import sqlite3
+import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, Generator, List
 import flet as ft
-from brain import AdaptiveBrain, LocalEngine, Storage, safe_display, research_web, format_research_context, format_sources, _public_url
+import requests
 
 BG, GLASS, EDGE = '#07080c', '#12131c', '#1e202e'
 CYAN, PURPLE, WHITE, MUTED = '#00f0ff', '#c5a3ff', '#f1efff', '#9295aa'
 MOTION = ft.Animation(300, ft.AnimationCurve.EASE_OUT)
+
 NAV = {
     'CHAT & INTELLIGENCE': ['VOID Core (Adaptive Chat)', 'Adaptive Learning Lab'],
     'POLYGLOT LAB': ['Polyglot Language Lab'],
@@ -22,16 +32,257 @@ NAV = {
     'LIFE & LIVE DATA': ['Life Command Deck', 'Live Data Hub', 'Newsroom'],
     'CONTROL CENTER': ['Security & Ethics Center', 'Customization Center', 'Engine Doctor & Telemetry'],
 }
+
 ALIASES = {
     'My Files & Photos': 'vault file upload search', 'File & Photo Factory': 'create file photo pdf',
     'Live Data Hub': 'weather stocks crypto', 'Newsroom': 'news rss headlines',
     'Life Command Deck': 'calendar appointment booking tasks', 'Polyglot Language Lab': 'translate hindi languages',
     'Engine Doctor & Telemetry': 'diagnostic errors status', 'Adaptive Learning Lab': 'learning brain memory',
 }
+
 CHAT_MODES = {'VOID Core (Adaptive Chat)', 'Polyglot Language Lab', 'Expert Domain Suite', 'Adaptive Learning Lab'}
 DATA_DIR = Path(os.getenv('VOID_DATA_DIR', str(Path.home() / '.void_sovereign')))
 _STORE: Storage | None = None
 _STORE_LOCK = threading.Lock()
+
+GOOGLE_SITE_VERIFICATION = os.getenv('GOOGLE_SITE_VERIFICATION', 'Vmq-IlyBC-OsAR4vf0...')
+
+
+@dataclass
+class StreamEvent:
+    kind: str  # 'attempt', 'diagnostic', 'token', 'error', 'done'
+    model: str
+    text: str = ""
+
+
+class Storage:
+    """Thread-safe SQLite persistence for user profiles, chats, and messages."""
+    def __init__(self, db_path: Path):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self):
+        return sqlite3.connect(self.db_path, timeout=15.0)
+
+    def _init_db(self):
+        with self._connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    owner TEXT PRIMARY KEY,
+                    data TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chats (
+                    chat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    msg_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+            """)
+
+    def profile(self, owner: str) -> dict:
+        with self._connect() as conn:
+            row = conn.execute("SELECT data FROM profiles WHERE owner = ?", (owner,)).fetchone()
+            if row:
+                try:
+                    data = json.loads(row[0])
+                except Exception:
+                    data = {}
+            else:
+                data = {}
+        data.setdefault("learning", {"interactions": 0, "topics": [], "preferred_lang": "auto"})
+        return data
+
+    def save_profile(self, owner: str, profile_data: dict):
+        profile_data.setdefault("learning", {})
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO profiles (owner, data) VALUES (?, ?)",
+                (owner, json.dumps(profile_data)),
+            )
+
+    def new_chat(self, owner: str) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO chats (owner, created_at) VALUES (?, ?)",
+                (owner, time.time()),
+            )
+            return int(cur.lastrowid)
+
+    def add_message(self, owner: str, chat_id: int, role: str, content: str):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO messages (owner, chat_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                (owner, chat_id, role, content, time.time()),
+            )
+
+    def history(self, owner: str, chat_id: int, limit: int = 20) -> List[Dict[str, str]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT role, content FROM messages WHERE owner = ? AND chat_id = ? ORDER BY msg_id DESC LIMIT ?",
+                (owner, chat_id, limit),
+            ).fetchall()
+        return [{"role": r, "content": c} for r, c in reversed(rows)]
+
+    def counts(self, owner: str):
+        with self._connect() as conn:
+            msgs = conn.execute("SELECT COUNT(*) FROM messages WHERE owner = ?", (owner,)).fetchone()[0]
+            chats = conn.execute("SELECT COUNT(*) FROM chats WHERE owner = ?", (owner,)).fetchone()[0]
+        return msgs, max(1, chats)
+
+    def list_chats(self, owner: str):
+        with self._connect() as conn:
+            return conn.execute("SELECT chat_id, created_at FROM chats WHERE owner = ? ORDER BY chat_id DESC", (owner,)).fetchall()
+
+
+class AdaptiveBrain:
+    def __init__(self, profile_data: dict | None = None):
+        self.profile = profile_data if isinstance(profile_data, dict) else {}
+        self.learning = self.profile.setdefault(
+            "learning", {"interactions": 0, "topics": [], "preferred_lang": "auto"}
+        )
+
+    def record_interaction(self, text: str):
+        self.learning["interactions"] = self.learning.get("interactions", 0) + 1
+        words = [w.strip(".,!?").lower() for w in text.split() if len(w) > 4]
+        if words:
+            topics = self.learning.get("topics", [])
+            for w in words[:3]:
+                if w not in topics:
+                    topics.append(w)
+            self.learning["topics"] = topics[-25:]
+
+    def system_prompt(self, user_input: str, mode: str, prism: bool) -> str:
+        interactions = self.learning.get("interactions", 0)
+        topics = ", ".join(self.learning.get("topics", [])[-8:]) or "general exploration"
+        prism_note = " Include a brief, structured analytical breakdown when helpful." if prism else ""
+        return (
+            f"You are VOID 9.2.0-MA — Sovereign OS Intelligence, architected by Avyan.\n"
+            f"Active Dimension / Mode: {mode}.\n"
+            f"Operator Interactions: {interactions} | Recent Context Interests: {topics}.\n"
+            f"Respond in the same language the user writes in (20+ languages supported including Hindi and English). "
+            f"Be sharp, insightful, empathetic, and clear.{prism_note}"
+        )
+
+
+class OpenRouterEngine:
+    def __init__(self):
+        self.models = [
+            "google/gemma-4-31b-it:free",
+            "nvidia/nemotron-3.5-lightning:free",
+            "nvidia/nemotron-3.5-super-vl:free",
+            "qwen/qwen3.8-27b:free",
+            "openrouter/free",
+        ]
+        self.known_models = self.models
+
+    def stream(self, messages: List[Dict[str, str]]) -> Generator[StreamEvent, None, None]:
+        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        if not api_key:
+            yield StreamEvent(kind="diagnostic", model="none", text="Missing OPENROUTER_API_KEY environment variable.")
+            yield StreamEvent(kind="error", model="none", text="Missing OPENROUTER_API_KEY. Add your key in Render.")
+            return
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://void-os.local",
+            "X-Title": "VOID Sovereign OS",
+        }
+
+        last_err = "Unknown error"
+        for model in self.models:
+            yield StreamEvent(kind="attempt", model=model, text=f"Attempting {model}...")
+            try:
+                resp = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json={"model": model, "messages": messages, "stream": True},
+                    stream=True,
+                    timeout=35,
+                )
+                if resp.status_code != 200:
+                    err_snippet = resp.text[:160].replace("\n", " ")
+                    last_err = f"{model} -> HTTP {resp.status_code}: {err_snippet}"
+                    yield StreamEvent(kind="diagnostic", model=model, text=last_err)
+                    continue
+
+                got_tokens = False
+                for raw_line in resp.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    line = raw_line if isinstance(raw_line, str) else raw_line.decode("utf-8", errors="ignore")
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content") or ""
+                        if token:
+                            got_tokens = True
+                            yield StreamEvent(kind="token", model=model, text=token)
+                    except Exception:
+                        continue
+
+                if got_tokens:
+                    yield StreamEvent(kind="done", model=model)
+                    return
+                else:
+                    last_err = f"{model} returned an empty stream."
+                    yield StreamEvent(kind="diagnostic", model=model, text=last_err)
+
+            except Exception as exc:
+                last_err = f"{model} failed: {type(exc).__name__}: {exc}"
+                yield StreamEvent(kind="diagnostic", model=model, text=last_err)
+                continue
+
+        yield StreamEvent(kind="error", model="all", text=f"All streaming engines failed. Last error: {last_err}")
+
+
+def safe_display(text: str, known_models=()) -> str:
+    return str(text)
+
+
+@contextmanager
+def verified_web_assets():
+    """Supply Flet with an index.html containing the Google verification tag."""
+    from flet_web import get_package_web_dir
+
+    original_assets = Path(__file__).resolve().parent / 'assets'
+    with tempfile.TemporaryDirectory(prefix='void-web-assets-') as directory:
+        assets = Path(directory)
+        if original_assets.is_dir():
+            shutil.copytree(original_assets, assets, dirs_exist_ok=True)
+        index = assets / 'index.html'
+        if not index.is_file():
+            shutil.copyfile(Path(get_package_web_dir()) / 'index.html', index)
+        source = index.read_text(encoding='utf-8')
+        tag = '<meta name="google-site-verification" content="{}" />'.format(
+            html.escape(GOOGLE_SITE_VERIFICATION, quote=True)
+        )
+        pattern = r'<meta\b(?=[^>]*\bname\s*=\s*[\"\']google-site-verification[\"\'])[^>]*>'
+        source = re.sub(pattern, '', source, flags=re.IGNORECASE)
+        source, count = re.subn(r'</head\s*>', lambda _: '  ' + tag + '\n</head>',
+                                source, count=1, flags=re.IGNORECASE)
+        if count != 1:
+            raise RuntimeError('Unable to add verification tag: HTML head is missing')
+        index.write_text(source, encoding='utf-8')
+        yield str(assets)
+
 
 def get_store() -> Storage:
     global _STORE
@@ -50,9 +301,8 @@ def main(page: ft.Page):
     owner = uuid.uuid4().hex
     brain = AdaptiveBrain(store.profile(owner))
     try:
-        engine = LocalEngine()
+        engine = OpenRouterEngine()
     except ValueError:
-        # Treat invalid configuration as an unavailable local core, never redirect to a remote host.
         engine = None
     state = {'chat': store.new_chat(owner), 'mode': 'VOID Core (Adaptive Chat)', 'busy': False,
              'runs': 0, 'prism': False, 'web': False, 'closed': False, 'attachment': None, 'diagnostics': [],
@@ -127,15 +377,11 @@ def main(page: ft.Page):
         codeblock_decoration=ft.BoxDecoration(bgcolor='#090a10', border=ft.Border.all(1, '#292b3e'), border_radius=10))
 
     def display(value):
-        # Preserve Markdown link targets so source citations remain usable; redact their visible labels.
-        import re
-        names = engine.known_models if engine else ()
-        parts = re.split(r'(\]\([^\s)]*\))', str(value))
-        return ''.join(part if part.startswith('](') else safe_display(part, names) for part in parts)
+        return safe_display(str(value))
 
     async def open_link(e):
         try:
-            if _public_url(e.data):
+            if e.data and e.data.startswith('http'):
                 await ft.UrlLauncher().launch_url(e.data)
         except (ValueError, TypeError):
             inform('This link could not be opened.')
@@ -242,33 +488,16 @@ def main(page: ft.Page):
         for control in quick_buttons:
             control.disabled = busy
 
-    async def run_response(messages, response_md, chat_id, query, web_enabled):
+    async def run_response(messages, response_md, chat_id):
         pieces = []
         failed = False
-        sources_text = ''
         previous_update = 0.0
         try:
-            if web_enabled:
-                status.value = 'SYNCHRONIZING'
-                response_md.value = 'Searching the web for useful sources…'
-                update()
-                result = await asyncio.to_thread(research_web, query)
-                if state['closed']:
-                    return
-                sources_text = format_sources(result)
-                if result.sources:
-                    messages[-1] = dict(messages[-1])
-                    messages[-1]['content'] += format_research_context(result)
-                    response_md.value = 'Sources found. Preparing an answer…'
-                else:
-                    inform('No web sources were found. The core can still answer without them.')
-                    response_md.value = 'No web sources found. Preparing an answer…'
-                update()
             if engine is None:
-                inform('Core configuration is invalid. Check local settings and retry.')
+                inform('OpenRouter API key missing or engine configuration is invalid.')
                 failed = True
             else:
-                async for event in engine.astream(messages):
+                for event in engine.stream(messages):
                     if state['closed']:
                         return
                     if event.kind == 'attempt':
@@ -296,18 +525,14 @@ def main(page: ft.Page):
             if state['closed']:
                 return
             if pieces:
-                actual = ''.join(pieces) + ('\n\n[Response interrupted. Please retry.]' if failed else '') + sources_text
+                actual = ''.join(pieces) + ('\n\n[Response interrupted. Please retry.]' if failed else '')
                 store.add_message(owner, chat_id, 'assistant', actual)
                 response_md.value = display(actual)
             elif failed:
-                actual = ('The local core is unavailable, but I found these web sources:' if sources_text
-                          else 'The core could not complete this request.') + sources_text
-                if sources_text:
-                    store.add_message(owner, chat_id, 'assistant', actual)
-                response_md.value = display(actual)
+                response_md.value = 'The core could not complete this request.'
             update_counts()
         except Exception:
-            logging.getLogger('void.ui').error('Local session error')
+            logging.getLogger('void.ui').error('Session error')
             if not state['closed']:
                 inform('Something interrupted this session. Please retry.')
                 response_md.value = display(''.join(pieces)) if pieces else 'The core could not complete this request.'
@@ -346,7 +571,7 @@ def main(page: ft.Page):
             set_busy(True)
             update_counts()
             update()
-            page.run_task(run_response, messages, response_md, state['chat'], value, state['web'])
+            page.run_task(run_response, messages, response_md, state['chat'])
         except Exception:
             set_busy(False)
             inform('Could not start this session. Please retry.')
@@ -419,12 +644,8 @@ def main(page: ft.Page):
 
     def toggle_web(e):
         state['web'] = bool(web_switch.value)
-        web_disclosure.value = 'ON · Queries sent to Bing & Wikipedia' if state['web'] else 'OFF · No searches sent'
+        web_disclosure.value = 'ON · Active mode' if state['web'] else 'OFF · No searches sent'
         web_disclosure.color = CYAN if state['web'] else MUTED
-        if state['web']:
-            inform('Web research is on. Each question is sent to Bing and Wikipedia; attached files are not included in the searches.')
-        else:
-            notification.visible = False
         update()
 
     search.on_change = filter_tools
@@ -442,10 +663,10 @@ def main(page: ft.Page):
     show_welcome()
 
     quick_specs = [
-        ('☀  Live Weather', 'Help me check current weather. Ask which city I mean. Only report current conditions if reliable current sources are provided; otherwise say you cannot verify them.'),
-        ('अ  हिन्दी में पूछें', 'नमस्ते! कृपया मुझसे सरल हिंदी में बात करें और पूछें कि मुझे किस विषय में मदद चाहिए।'),
-        ('♡  Emotional Support', 'I would like emotional support. Please listen kindly and ask what is on my mind.'),
-        ('◷  Book Appointment', 'Help me prepare to book an appointment. Ask for details; do not claim that a booking was made.'),
+        ('☀  Live Weather', 'Help me check current weather conditions.'),
+        ('अ  हिन्दी में पूछें', 'नमस्ते! कृपया मुझसे सरल हिंदी में बात करें।'),
+        ('♡  Emotional Support', 'I would like emotional support and a friendly ear.'),
+        ('◷  Book Appointment', 'Help me prepare to book an appointment.'),
     ]
     for label, prompt in quick_specs:
         button = pill(txt(label, 12, '#dfdce9'), lambda e, p=prompt: submit(p))
@@ -466,7 +687,7 @@ def main(page: ft.Page):
             ft.Row([ft.Column([counter_msgs, txt('Msgs', 10)], spacing=2, expand=True),
                     ft.Column([counter_chats, txt('Chats', 10)], spacing=2, expand=True),
                     ft.Column([counter_runs, txt('Runs', 10)], spacing=2, expand=True)]),
-            txt('SESSION  ·  LOCAL INFERENCE', 9, '#686d80')]))
+            txt('SESSION  ·  OPENROUTER CLOUD', 9, '#686d80')]))
 
     stage_body.controls = [
         ft.Row([status, ft.Container(expand=True), web_disclosure, web_switch], vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -479,7 +700,6 @@ def main(page: ft.Page):
         ft.Row([attach_label, clear_attach], spacing=2),
         glass(ft.Row([attach, command, send], spacing=4), padding=5),
         txt('Enter to send  ·  Shift+Enter for a new line  ·  Check important information', 10, '#717588')]
-    # The colored circles are ornamental: window-manager actions differ across desktop and web.
     header = ft.Row([ft.Container(bgcolor=c, width=10, height=10, border_radius=10) for c in ('#ff6a61', '#f8bf55', '#4fd37b')], spacing=7)
     stage = ft.Container(expand=True, padding=ft.Padding.symmetric(horizontal=32, vertical=22),
                          content=ft.Column([header, stage_body], expand=True, spacing=18))
@@ -489,9 +709,9 @@ def main(page: ft.Page):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
-    # Web binding defaults to loopback for local runs; cloud platforms set PORT.
     port = int(os.getenv('PORT', os.getenv('FLET_PORT', '8550')))
     host = os.getenv('FLET_HOST', '0.0.0.0' if os.getenv('PORT') else '127.0.0.1')
     web = os.getenv('VOID_WEB') == '1' or bool(os.getenv('PORT'))
-    ft.run(main, host=host, port=port,
-           view=ft.AppView.WEB_BROWSER if web else ft.AppView.FLET_APP)
+    with verified_web_assets() as web_assets:
+        ft.run(main, host=host, port=port, assets_dir=web_assets,
+               view=ft.AppView.WEB_BROWSER if web else ft.AppView.FLET_APP)
