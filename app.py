@@ -1,19 +1,14 @@
 """VOID Sovereign Flet application; all inference and storage live in brain.py."""
 from __future__ import annotations
 import asyncio
-import html
 import logging
 import os
-import re
-import shutil
-import tempfile
 import threading
 import time
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
 import flet as ft
-from brain import AdaptiveBrain, LocalEngine, Storage, safe_display
+from brain import AdaptiveBrain, LocalEngine, Storage, safe_display, research_web, format_research_context, format_sources, _public_url
 
 BG, GLASS, EDGE = '#07080c', '#12131c', '#1e202e'
 CYAN, PURPLE, WHITE, MUTED = '#00f0ff', '#c5a3ff', '#f1efff', '#9295aa'
@@ -38,44 +33,6 @@ DATA_DIR = Path(os.getenv('VOID_DATA_DIR', str(Path.home() / '.void_sovereign'))
 _STORE: Storage | None = None
 _STORE_LOCK = threading.Lock()
 
-# Replace this value with the full Search Console token if the supplied ellipsis
-# is an abbreviation. The optional environment override supports deployment.
-GOOGLE_SITE_VERIFICATION = os.getenv(
-    'GOOGLE_SITE_VERIFICATION', '<meta name="google-site-verification" content="Vmq-lIyBC-OsAR4vfQl6coARlWUeQ4ILUuRvuFK3qr4" />'
-)
-
-
-@contextmanager
-def verified_web_assets():
-    """Supply Flet with an index.html containing the tag in the initial HTML head.
-
-    Flet copies index.html from assets_dir before applying its own web settings;
-    all other packaged runtime files continue to be served by Flet normally.
-    """
-    from flet_web import get_package_web_dir
-
-    original_assets = Path(__file__).resolve().parent / 'assets'
-    with tempfile.TemporaryDirectory(prefix='void-web-assets-') as directory:
-        assets = Path(directory)
-        if original_assets.is_dir():
-            shutil.copytree(original_assets, assets, dirs_exist_ok=True)
-        index = assets / 'index.html'
-        if not index.is_file():
-            shutil.copyfile(Path(get_package_web_dir()) / 'index.html', index)
-        source = index.read_text(encoding='utf-8')
-        tag = '<meta name="google-site-verification" content="{}" />'.format(
-            html.escape(GOOGLE_SITE_VERIFICATION, quote=True)
-        )
-        pattern = r'<meta\b(?=[^>]*\bname\s*=\s*[\"\']google-site-verification[\"\'])[^>]*>'
-        source = re.sub(pattern, '', source, flags=re.IGNORECASE)
-        source, count = re.subn(r'</head\s*>', lambda _: '  ' + tag + '\n</head>',
-                                source, count=1, flags=re.IGNORECASE)
-        if count != 1:
-            raise RuntimeError('Unable to add verification tag: HTML head is missing')
-        index.write_text(source, encoding='utf-8')
-        yield str(assets)
-
-
 def get_store() -> Storage:
     global _STORE
     with _STORE_LOCK:
@@ -98,7 +55,8 @@ def main(page: ft.Page):
         # Treat invalid configuration as an unavailable local core, never redirect to a remote host.
         engine = None
     state = {'chat': store.new_chat(owner), 'mode': 'VOID Core (Adaptive Chat)', 'busy': False,
-             'runs': 0, 'prism': False, 'closed': False, 'attachment': None, 'diagnostics': []}
+             'runs': 0, 'prism': False, 'web': False, 'closed': False, 'attachment': None, 'diagnostics': [],
+             'welcome': True}
 
     def txt(value, size=12, color=MUTED, **kwargs):
         return ft.Text(value, size=size, color=color, **kwargs)
@@ -156,6 +114,8 @@ def main(page: ft.Page):
                           content_padding=10)
     tool_column = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO, expand=True)
     prism = ft.Switch(value=False, active_color=PURPLE, label='VOID Prism Panel')
+    web_switch = ft.Switch(value=False, active_color=CYAN, label='Web research')
+    web_disclosure = txt('OFF · No searches sent', 10, MUTED)
     stage_body = ft.Column(expand=True, spacing=12, animate_opacity=MOTION, opacity=1)
     quick_buttons = []
     style = ft.MarkdownStyleSheet(
@@ -167,18 +127,57 @@ def main(page: ft.Page):
         codeblock_decoration=ft.BoxDecoration(bgcolor='#090a10', border=ft.Border.all(1, '#292b3e'), border_radius=10))
 
     def display(value):
-        return safe_display(value, engine.known_models if engine else ())
+        # Preserve Markdown link targets so source citations remain usable; redact their visible labels.
+        import re
+        names = engine.known_models if engine else ()
+        parts = re.split(r'(\]\([^\s)]*\))', str(value))
+        return ''.join(part if part.startswith('](') else safe_display(part, names) for part in parts)
+
+    async def open_link(e):
+        try:
+            if _public_url(e.data):
+                await ft.UrlLauncher().launch_url(e.data)
+        except (ValueError, TypeError):
+            inform('This link could not be opened.')
+            update()
 
     def bubble(role, value):
         user = role == 'user'
         md = ft.Markdown(value=display(value), selectable=True, extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                         auto_follow_links=False, fit_content=True, md_style_sheet=style)
+                         auto_follow_links=False, on_tap_link=open_link, fit_content=True, md_style_sheet=style)
         card = ft.Container(ft.Column([txt('OPERATOR' if user else '✦  VOID INTELLIGENCE', 10,
                     PURPLE if user else CYAN, weight=ft.FontWeight.BOLD), md], spacing=8),
                     bgcolor='#1c1829' if user else '#12131c', border=ft.Border.all(1, '#33283f' if user else EDGE),
                     border_radius=16, padding=16, expand=True, animate_opacity=MOTION)
         chat.controls.append(ft.Row([card], alignment=ft.MainAxisAlignment.END if user else ft.MainAxisAlignment.START))
         return md
+
+    def show_welcome():
+        state['welcome'] = True
+        hero = ft.Container(
+            padding=28, border_radius=22, border=ft.Border.all(1, '#333149'),
+            gradient=ft.LinearGradient(begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT,
+                                       colors=['#24203e', '#141621', '#10252a']),
+            content=ft.Column(spacing=15, controls=[
+                ft.Row([ft.Container(ft.Icon(ft.Icons.AUTO_AWESOME, color=CYAN, size=25),
+                                     bgcolor='#262b42', border_radius=14, padding=13),
+                        ft.Column([caption('YOUR PERSONAL INTELLIGENCE'),
+                                   txt('A little more possible.', 23, WHITE, weight=ft.FontWeight.BOLD)], spacing=5)]),
+                txt('Think clearly. Create boldly. Explore the world with a workspace that moves with you.',
+                    14, '#c1c2d5'),
+                ft.Row([ft.Container(txt(label, 10, color, weight=ft.FontWeight.BOLD),
+                                     bgcolor='#302d47', border_radius=20, padding=8)
+                        for label, color in [('✦  CREATE', PURPLE), ('◎  DISCOVER', CYAN), ('◇  SIMPLIFY', '#e0d8ff')]],
+                       wrap=True, spacing=8)]))
+        tips = ft.Row(wrap=True, spacing=10, run_spacing=10, controls=[
+            glass(ft.Row([ft.Icon(icon, color=color, size=18),
+                          ft.Column([txt(title, 12, WHITE, weight=ft.FontWeight.BOLD), txt(detail, 10)], spacing=3)], spacing=10),
+                  padding=14, width=230)
+            for icon, color, title, detail in [
+                (ft.Icons.BOLT_ROUNDED, CYAN, 'Fast & focused', 'Clear answers, without the noise'),
+                (ft.Icons.TRAVEL_EXPLORE, PURPLE, 'Explore the web', 'Turn on research for live sources'),
+                (ft.Icons.AUTO_AWESOME, '#edbdfb', 'Made for ideas', 'Plan, write and create together')]])
+        chat.controls = [ft.Container(content=ft.Column([hero, tips], spacing=14), padding=ft.Padding.only(top=18))]
 
     def inform(message):
         notice_text.value = display(message)
@@ -239,15 +238,32 @@ def main(page: ft.Page):
 
     def set_busy(busy):
         state['busy'] = busy
-        send.disabled = new_session.disabled = sessions.disabled = attach.disabled = busy
+        send.disabled = new_session.disabled = sessions.disabled = attach.disabled = web_switch.disabled = busy
         for control in quick_buttons:
             control.disabled = busy
 
-    async def run_response(messages, response_md, chat_id):
+    async def run_response(messages, response_md, chat_id, query, web_enabled):
         pieces = []
         failed = False
+        sources_text = ''
         previous_update = 0.0
         try:
+            if web_enabled:
+                status.value = 'SYNCHRONIZING'
+                response_md.value = 'Searching the web for useful sources…'
+                update()
+                result = await asyncio.to_thread(research_web, query)
+                if state['closed']:
+                    return
+                sources_text = format_sources(result)
+                if result.sources:
+                    messages[-1] = dict(messages[-1])
+                    messages[-1]['content'] += format_research_context(result)
+                    response_md.value = 'Sources found. Preparing an answer…'
+                else:
+                    inform('No web sources were found. The core can still answer without them.')
+                    response_md.value = 'No web sources found. Preparing an answer…'
+                update()
             if engine is None:
                 inform('Core configuration is invalid. Check local settings and retry.')
                 failed = True
@@ -280,11 +296,15 @@ def main(page: ft.Page):
             if state['closed']:
                 return
             if pieces:
-                actual = ''.join(pieces) + ('\n\n[Response interrupted. Please retry.]' if failed else '')
+                actual = ''.join(pieces) + ('\n\n[Response interrupted. Please retry.]' if failed else '') + sources_text
                 store.add_message(owner, chat_id, 'assistant', actual)
                 response_md.value = display(actual)
             elif failed:
-                response_md.value = 'The core could not complete this request.'
+                actual = ('The local core is unavailable, but I found these web sources:' if sources_text
+                          else 'The core could not complete this request.') + sources_text
+                if sources_text:
+                    store.add_message(owner, chat_id, 'assistant', actual)
+                response_md.value = display(actual)
             update_counts()
         except Exception:
             logging.getLogger('void.ui').error('Local session error')
@@ -311,6 +331,9 @@ def main(page: ft.Page):
             store.save_profile(owner, brain.profile)
             messages = [{'role': 'system', 'content': brain.system_prompt(value, state['mode'], state['prism'])}]
             messages += store.history(owner, state['chat'])
+            if state['welcome']:
+                chat.controls.clear()
+                state['welcome'] = False
             bubble('user', value + ('\n\n📎 ' + attachment['name'] if attachment else ''))
             response_md = bubble('assistant', 'Preparing response…')
             state['attachment'] = None
@@ -323,7 +346,7 @@ def main(page: ft.Page):
             set_busy(True)
             update_counts()
             update()
-            page.run_task(run_response, messages, response_md, state['chat'])
+            page.run_task(run_response, messages, response_md, state['chat'], value, state['web'])
         except Exception:
             set_busy(False)
             inform('Could not start this session. Please retry.')
@@ -336,6 +359,7 @@ def main(page: ft.Page):
         state['attachment'] = None
         attach_label.visible = clear_attach.visible = False
         chat.controls.clear()
+        show_welcome()
         notification.visible = False
         status.value = 'READY'
         update_sessions()
@@ -347,8 +371,12 @@ def main(page: ft.Page):
             return
         state['chat'] = sessions.value
         chat.controls.clear()
-        for message in store.history(owner, state['chat'], 200):
+        history = store.history(owner, state['chat'], 200)
+        state['welcome'] = not history
+        for message in history:
             bubble(message.get('role', 'assistant'), message.get('content', ''))
+        if not history:
+            show_welcome()
         notification.visible = False
         update()
 
@@ -389,10 +417,21 @@ def main(page: ft.Page):
         diagnostic_panel.visible = state['prism'] or state['mode'] == 'Engine Doctor & Telemetry'
         update()
 
+    def toggle_web(e):
+        state['web'] = bool(web_switch.value)
+        web_disclosure.value = 'ON · Queries sent to Bing & Wikipedia' if state['web'] else 'OFF · No searches sent'
+        web_disclosure.color = CYAN if state['web'] else MUTED
+        if state['web']:
+            inform('Web research is on. Each question is sent to Bing and Wikipedia; attached files are not included in the searches.')
+        else:
+            notification.visible = False
+        update()
+
     search.on_change = filter_tools
     radio_group.on_change = change_mode
     sessions.on_change = select_chat
     prism.on_change = toggle_prism
+    web_switch.on_change = toggle_web
     attach.on_click = choose_file
     clear_attach.on_click = remove_file
     send.on_click = lambda e: submit(command.value)
@@ -400,9 +439,10 @@ def main(page: ft.Page):
     new_session.on_click = new_chat
     render_tools()
     update_sessions()
+    show_welcome()
 
     quick_specs = [
-        ('☀  Live Weather', 'Help me check current weather. Ask for my location and explain that live weather is not connected.'),
+        ('☀  Live Weather', 'Help me check current weather. Ask which city I mean. Only report current conditions if reliable current sources are provided; otherwise say you cannot verify them.'),
         ('अ  हिन्दी में पूछें', 'नमस्ते! कृपया मुझसे सरल हिंदी में बात करें और पूछें कि मुझे किस विषय में मदद चाहिए।'),
         ('♡  Emotional Support', 'I would like emotional support. Please listen kindly and ask what is on my mind.'),
         ('◷  Book Appointment', 'Help me prepare to book an appointment. Ask for details; do not claim that a booking was made.'),
@@ -429,7 +469,7 @@ def main(page: ft.Page):
             txt('SESSION  ·  LOCAL INFERENCE', 9, '#686d80')]))
 
     stage_body.controls = [
-        ft.Row([status, ft.Container(expand=True), txt('READY', 10, CYAN, weight=ft.FontWeight.BOLD)]),
+        ft.Row([status, ft.Container(expand=True), web_disclosure, web_switch], vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ft.Divider(color=EDGE, height=4),
         ft.Row([ft.Column([txt('Hello, Operator', 30, WHITE, weight=ft.FontWeight.BOLD),
                            txt('Your intelligence workspace is ready. What shall we explore?', 13)], spacing=5, expand=True),
@@ -453,6 +493,5 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', os.getenv('FLET_PORT', '8550')))
     host = os.getenv('FLET_HOST', '0.0.0.0' if os.getenv('PORT') else '127.0.0.1')
     web = os.getenv('VOID_WEB') == '1' or bool(os.getenv('PORT'))
-    with verified_web_assets() as web_assets:
-        ft.run(main, host=host, port=port, assets_dir=web_assets,
-               view=ft.AppView.WEB_BROWSER if web else ft.AppView.FLET_APP)
+    ft.run(main, host=host, port=port,
+           view=ft.AppView.WEB_BROWSER if web else ft.AppView.FLET_APP)
