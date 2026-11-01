@@ -41,7 +41,7 @@ _STORE_LOCK = threading.Lock()
 # Replace this value with the full Search Console token if the supplied ellipsis
 # is an abbreviation. The optional environment override supports deployment.
 GOOGLE_SITE_VERIFICATION = os.getenv(
-    'GOOGLE_SITE_VERIFICATION', 'Vmq-IlyBC-OsAR4vf0...'
+    'GOOGLE_SITE_VERIFICATION', '<meta name="google-site-verification" content="Vmq-lIyBC-OsAR4vfQl6coARlWUeQ4ILUuRvuFK3qr4" />'
 )
 
 
